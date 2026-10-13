@@ -1,50 +1,66 @@
---// ═══════════════════════════════════════════════════════════
---// Luasec Loader v2 — Platoboost + UI + Tamper
---// T0-T19 | UI ใส่ key | XOR | RNG | Runtime Secret | HB
---// ═══════════════════════════════════════════════════════════
+-- ===========================================================
+-- Luasec Loader v2 - Platoboost + UI + Tamper
+-- T0-T19 | UI | XOR | RNG | Runtime Secret | Heartbeat
+-- ===========================================================
 local HttpService = game:GetService("HttpService")
 local Players     = game:GetService("Players")
 local RunService  = game:GetService("RunService")
 
 local BASE_URL = "https://keysytemdemo.vercel.app"
 
--- ═══════════════════════════════════════════════════════════
--- T0: ต้องตั้ง getgenv().script
--- ═══════════════════════════════════════════════════════════
+-- ===========================================================
+-- T0: require getgenv().script
+-- ===========================================================
 local userScript = getgenv().script or _G.script
 
 if userScript == nil then
     return Players.LocalPlayer:Kick(
-        "[Luasec] ต้องตั้งค่า getgenv().script ก่อน:\n\n" ..
-        'getgenv().script = "ชื่อสคริปต์"\n' ..
+        "[Luasec] Set getgenv().script first:\n\n" ..
+        'getgenv().script = "scriptname"\n' ..
         'loadstring(game:HttpGet("' .. BASE_URL .. '/loader.lua"))()'
     )
 end
+
 if type(userScript) ~= "string" then
-    return Players.LocalPlayer:Kick("[Luasec] getgenv().script ต้องเป็น string")
+    return Players.LocalPlayer:Kick("[Luasec] getgenv().script must be string")
 end
+
 if #userScript < 1 or #userScript > 64 then
-    return Players.LocalPlayer:Kick("[Luasec] getgenv().script ต้องมี 1-64 ตัวอักษร")
+    return Players.LocalPlayer:Kick("[Luasec] getgenv().script must be 1-64 chars")
 end
+
 if not userScript:match("^[%w_%-]+$") then
-    return Players.LocalPlayer:Kick("[Luasec] getgenv().script มีอักขระไม่ถูกต้อง")
+    return Players.LocalPlayer:Kick("[Luasec] getgenv().script invalid format")
 end
 
 local SCRIPT_NAME = userScript
 local SCRIPT_NAME_LOCKED = SCRIPT_NAME
 local USER_KEY = getgenv().Key or _G.Key or ""
 
--- ═══ Locals ═══
-local Char, Byte, Gmatch = ("").char, ("").byte, ("").gmatch
-local ServerId, XORKey, Ticket, HttpRequest = "", "", "", nil
+print("[Luasec] Loader started - script:", SCRIPT_NAME_LOCKED)
+
+-- ===========================================================
+-- Locals
+-- ===========================================================
+local Char = ("").char
+local Byte = ("").byte
+local Gmatch = ("").gmatch
+
+local ServerId = ""
+local XORKey = ""
+local Ticket = ""
+local HttpRequest = nil
 local HeartbeatAlive = false
 
--- ═══ Helpers ═══
+-- ===========================================================
+-- Helpers
+-- ===========================================================
 local function SecureCrash()
     if NfCrash then NfCrash() else while true do end end
 end
 
 local function KickPlayer(Reason, Code)
+    print("[Luasec] Kick:", tostring(Reason))
     if Code == 0 and rawequal(Code, 0) then
         Players.LocalPlayer:Kick(tostring(Reason))
     elseif Code == 1 and rawequal(Code, 1) then
@@ -77,14 +93,18 @@ end
 
 local function Split(str, sep)
     local out = {}
-    for p in Gmatch(str, "([^" .. sep .. "]+)") do table.insert(out, p) end
+    for p in Gmatch(str, "([^" .. sep .. "]+)") do
+        table.insert(out, p)
+    end
     return out
 end
 
 local function GetHWID()
     if type(gethwid) == "function" then
         local ok, v = pcall(gethwid)
-        if ok and type(v) == "string" and #v > 0 and #v <= 512 then return v end
+        if ok and type(v) == "string" and #v > 0 and #v <= 512 then
+            return v
+        end
     end
     if syn and type(syn.get_hwid) == "function" then
         local ok, v = pcall(syn.get_hwid)
@@ -98,21 +118,33 @@ local function GetHWID()
     return tostring(lp.UserId) .. "|" .. tostring(lp.AccountAge) .. "|" .. tostring(game.PlaceId or 0)
 end
 
--- ═══ Tamper T1-T18 ═══
+-- ===========================================================
+-- Tamper T1-T18
+-- ===========================================================
 if getgenv().Luasec and Luasec and _G.Luasec then return end
-getgenv().Luasec = true; Luasec = true; _G.Luasec = true
+getgenv().Luasec = true
+Luasec = true
+_G.Luasec = true
 
 if RunService:IsStudio() then return TamperKick("T2") end
 
 do
     local ok, err = pcall(pcall)
-    if ok or err ~= "missing argument #1" then return TamperKick("T3") end
+    if ok or err ~= "missing argument #1" then
+        return TamperKick("T3")
+    end
 end
 
 local function CheckFn(name, fn)
-    if type(fn) ~= "function" then TamperKick("T4:" .. name); return false end
+    if type(fn) ~= "function" then
+        TamperKick("T4:" .. name)
+        return false
+    end
     local ok, hooked = pcall(isfunctionhooked, fn)
-    if not ok or hooked then TamperKick("T4:" .. name); return false end
+    if not ok or hooked then
+        TamperKick("T4:" .. name)
+        return false
+    end
     return true
 end
 
@@ -123,7 +155,16 @@ if not CheckFn("pcall", pcall) then return end
 if not CheckFn("math.random", math.random) then return end
 
 do
-    if math.random(1, 2) == math.random(3, 4) then return TamperKick("T5") end
+    if math.random(1, 2) == math.random(3, 4) then
+        return TamperKick("T5")
+    end
+    local Same, Last = 0, 0
+    for _ = 1, 100 do
+        local Cur = math.random(1, 3569)
+        if Cur == Last then Same = Same + 1 end
+        Last = Cur
+    end
+    if Same > 10 then return TamperKick("T5") end
 end
 
 do
@@ -157,13 +198,19 @@ end
 do
     local List = {}
     for _, V in pairs({ http.request, request, http_request }) do
-        if V ~= nil and type(V) == "function" then List[#List + 1] = V end
+        if V ~= nil and type(V) == "function" then
+            List[#List + 1] = V
+        end
     end
-    if #List == 0 then return KickPlayer("Executor ไม่รองรับ HTTP", 0) end
+    if #List == 0 then return KickPlayer("Executor does not support HTTP", 0) end
     HttpRequest = List[math.random(1, #List)]
 end
 
+print("[Luasec] Tamper checks passed")
+
+-- ===========================================================
 -- Crypto
+-- ===========================================================
 local Charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 local function Xor(data, key)
@@ -218,13 +265,18 @@ local function Base64Decode(str)
     return out
 end
 
+-- ===========================================================
 -- RNG
+-- ===========================================================
 local function Floor(n)
     if n >= 0 then return n - (n % 1) end
     if n % 1 == 0 then return n end
     return n - (n % 1) - 1
 end
-local function Abs(n) return n < 0 and -n or n end
+
+local function Abs(n)
+    return n < 0 and -n or n
+end
 
 local function Equate(X)
     X = X + 73
@@ -237,13 +289,12 @@ local function Equate(X)
     return (Y * 7919 + 1234567) % 100000000000003
 end
 
-local function inverse(y) return ((y * 20) + 5) / 10 end
+local function inverse(y)
+    return ((y * 20) + 5) / 10
+end
 
+-- NOTE: GetRngSeed uses math.random only (no WYNF dependency)
 local function GetRngSeed()
-    if type(WYNF_GET_RNG_SEED) == "function" then
-        local ok, v = pcall(WYNF_GET_RNG_SEED)
-        if ok and v then return v end
-    end
     return math.random(1, 1000000)
 end
 
@@ -262,24 +313,28 @@ local function R1()
     local r1, r2 = math.random(1, 1000), math.random(1, 1000)
     return Equate(((r1 ~= 0) and (b * r1) or b) + r2 + (E1() % (r2 + 1)))
 end
+
 local function R2()
     local b = GetRngSeed() + GetRngSeed() + E3() + E4()
     local r3, r4 = math.random(1, 1000), math.random(1, 1000)
     local c = (r3 % 2 == 0) and (b + r3) or (b - (r3 % 256))
     return Equate(((r4 ~= 0) and (c * r4) or c) + E3())
 end
+
 local function R3()
     local b = GetRngSeed() + GetRngSeed() + E5() + E6()
     local r5, r6 = math.random(1, 1000), math.random(1, 1000)
     local sh = bit32.lshift(b % 2^20, (r5 % 8))
     return Equate(((r6 > 0) and (sh % (r6 + 1)) or sh) + r5 + E5())
 end
+
 local function R4()
     local b = GetRngSeed() + GetRngSeed() + E4() + E5()
     local r7, r8 = math.random(1, 1000), math.random(1, 1000)
     local x = bit32.bxor(b % 2^20, r7)
     return Equate(((r8 ~= 0) and (x * (r8 % 100)) or x) + E4() + r7)
 end
+
 local function R5()
     local b = GetRngSeed() + GetRngSeed() + E6() + E4()
     local r9, r10 = math.random(1, 1000), math.random(1, 1000)
@@ -287,7 +342,9 @@ local function R5()
     return Equate(((r9 ~= 0) and (m * r9) or m) + E6() + r10)
 end
 
--- POST
+-- ===========================================================
+-- POST helper
+-- ===========================================================
 local function postJSON(path, payload)
     local ok, res = pcall(HttpRequest, {
         Url = BASE_URL .. path,
@@ -295,11 +352,15 @@ local function postJSON(path, payload)
         Headers = { ["Content-Type"] = "application/json" },
         Body = HttpService:JSONEncode(payload),
     })
-    if not ok or type(res) ~= "table" then return nil, "เชื่อมต่อไม่ได้" end
+    if not ok or type(res) ~= "table" then
+        return nil, "Connection failed"
+    end
     local status = res.StatusCode or res.Status
     local decoded
-    local ok2 = pcall(function() decoded = HttpService:JSONDecode(res.Body or "{}") end)
-    if not ok2 then return nil, "Response เพี้ยน" end
+    local ok2 = pcall(function()
+        decoded = HttpService:JSONDecode(res.Body or "{}")
+    end)
+    if not ok2 then return nil, "Invalid response" end
     return { status = status, data = decoded, body = res.Body or "" }, nil
 end
 
@@ -309,15 +370,19 @@ local function EncodeBody(tbl)
     local b64 = Base64(encrypted)
     local full = XORKey .. b64
     local bytes = {}
-    for i = 1, #full do table.insert(bytes, Byte(full, i)) end
+    for i = 1, #full do
+        table.insert(bytes, Byte(full, i))
+    end
     return { Data = bytes }
 end
 
--- ═══ Load & Run ═══
+-- ===========================================================
+-- Load & Run
+-- ===========================================================
 local function LoadScript(decrypted, key)
     local RuntimeSecret = decrypted.RuntimeSecret or ""
     if type(RuntimeSecret) ~= "string" or #RuntimeSecret ~= 64 then
-        return KickPlayer("Runtime secret ผิด", 0)
+        return KickPlayer("Invalid runtime secret", 0)
     end
 
     getgenv().LuasecLoader   = true
@@ -332,12 +397,24 @@ local function LoadScript(decrypted, key)
 
     ServerId = decrypted.ServerId or ""
 
-    if _G.LUASEC_UI then _G.LUASEC_UI:Destroy(); _G.LUASEC_UI = nil end
+    if _G.LUASEC_UI then
+        pcall(function() _G.LUASEC_UI:Destroy() end)
+        _G.LUASEC_UI = nil
+    end
+
+    print("[Luasec] Loading script...")
 
     local chunk = SafeLoadstring(decrypted.Body)
-    if not chunk then return KickPlayer("Load ไม่สำเร็จ", 0) end
+    if not chunk then
+        return KickPlayer("Load failed", 0)
+    end
+
     local ok = pcall(chunk)
-    if not ok then return KickPlayer("รันไม่สำเร็จ", 0) end
+    if not ok then
+        return KickPlayer("Run failed", 0)
+    end
+
+    print("[Luasec] Script loaded successfully")
 
     -- Heartbeat
     HeartbeatAlive = true
@@ -358,13 +435,18 @@ local function LoadScript(decrypted, key)
                 return KickPlayer("script name changed", 1)
             end
 
-            local hb = EncodeBody({ ServerId = ServerId, scriptName = SCRIPT_NAME_LOCKED })
+            local hb = EncodeBody({
+                ServerId = ServerId,
+                scriptName = SCRIPT_NAME_LOCKED,
+            })
             hb.ticket = Ticket
             local hbRes = postJSON("/api/heartbeat", hb)
             if hbRes and hbRes.status == 200 and hbRes.data and hbRes.data.Data then
                 local okDec2, dec2 = pcall(function()
                     local raw = ""
-                    for _, b in ipairs(hbRes.data.Data) do raw = raw .. Char(b) end
+                    for _, b in ipairs(hbRes.data.Data) do
+                        raw = raw .. Char(b)
+                    end
                     return HttpService:JSONDecode(Xor(Base64Decode(raw:sub(#XORKey + 1)), XORKey))
                 end)
                 if okDec2 and type(dec2) == "table" and dec2.kick then
@@ -389,46 +471,74 @@ local function FetchAndLoad(key, sname)
     local hwid = GetHWID()
     local userId = tostring(Players.LocalPlayer.UserId)
 
+    print("[Luasec] Verifying key...")
+
     local r1, err = postJSON("/api/verify", {
         key = key,
         hwid = hwid,
         userId = userId,
         scriptName = sname,
     })
-    if not r1 then return nil, err or "เชื่อมต่อไม่ได้" end
-    if r1.status == 429 then return nil, "โดน rate limit" end
-    if r1.status == 403 then return nil, r1.data.message or "Banned" end
+
+    if not r1 then
+        return nil, err or "Connection failed"
+    end
+    if r1.status == 429 then
+        return nil, "Rate limited"
+    end
+    if r1.status == 403 then
+        return nil, r1.data.message or "Banned"
+    end
     if r1.status ~= 200 or r1.data.valid ~= true then
-        return nil, r1.data.message or r1.data.error or "Key ไม่ถูกต้อง"
+        return nil, r1.data.message or r1.data.error or "Invalid key"
     end
 
     Ticket = r1.data.ticket
     XORKey = r1.data.k or ""
 
+    print("[Luasec] Key verified, loading script...")
+
     local rng = {
-        Rng1 = Floor(R1()), Rng2 = Floor(R2()), Rng3 = Floor(R3()),
-        Rng4 = Floor(R4()), Rng5 = Floor(R5()),
+        Rng1 = Floor(R1()),
+        Rng2 = Floor(R2()),
+        Rng3 = Floor(R3()),
+        Rng4 = Floor(R4()),
+        Rng5 = Floor(R5()),
     }
+
     local body = EncodeBody(rng)
     body.ticket = Ticket
     body.scriptName = sname
 
     local r2, err2 = postJSON("/api/script", body)
-    if not r2 then return nil, err2 or "โหลด script ไม่ได้" end
-    if r2.status ~= 200 then return nil, r2.body or "โหลดไม่ได้" end
+    if not r2 then
+        return nil, err2 or "Script fetch failed"
+    end
+    if r2.status ~= 200 then
+        return nil, r2.body or "Script fetch failed"
+    end
 
     local resp = r2.data
-    if not resp or not resp.Data then return nil, "Response เพี้ยน" end
+    if not resp or not resp.Data then
+        return nil, "Invalid response"
+    end
 
     local okDec, decrypted = pcall(function()
         local raw = ""
-        for _, b in ipairs(resp.Data) do raw = raw .. Char(b) end
+        for _, b in ipairs(resp.Data) do
+            raw = raw .. Char(b)
+        end
         local b64 = raw:sub(#XORKey + 1)
         return HttpService:JSONDecode(Xor(Base64Decode(b64), XORKey))
     end)
 
-    if not okDec or type(decrypted) ~= "table" then return nil, "ถอดรหัสไม่ได้" end
-    if decrypted.Valid ~= true then return nil, decrypted.reason or "Server ปฏิเสธ" end
+    if not okDec or type(decrypted) ~= "table" then
+        return nil, "Decode failed"
+    end
+
+    if decrypted.Valid ~= true then
+        return nil, decrypted.reason or "Server rejected"
+    end
 
     if decrypted.check then
         local parts = Split(decrypted.check, "|")
@@ -439,43 +549,59 @@ local function FetchAndLoad(key, sname)
                 SecureEQ(math.floor(inverse(tonumber(parts[3]))), rng.Rng3) and
                 SecureEQ(math.floor(inverse(tonumber(parts[4]))), rng.Rng4) and
                 SecureEQ(math.floor(inverse(tonumber(parts[5]))), rng.Rng5)
-            if not okCheck then return nil, "Check ไม่ตรง" end
+            if not okCheck then
+                return nil, "RNG check failed"
+            end
         end
     end
 
     return decrypted
 end
 
--- ═══ UI ═══
+-- ===========================================================
+-- UI
+-- ===========================================================
 local function MakeUI()
-    if _G.LUASEC_UI then pcall(function() _G.LUASEC_UI:Destroy() end) end
+    if _G.LUASEC_UI then
+        pcall(function() _G.LUASEC_UI:Destroy() end)
+    end
 
     local gui = Instance.new("ScreenGui")
     gui.Name = "LuasecUI"
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     pcall(function() gui.Parent = game:GetService("CoreGui") end)
-    if not gui.Parent then gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui") end
+    if not gui.Parent then
+        gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+    end
     _G.LUASEC_UI = gui
 
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 340, 0, 320)
-    frame.Position = UDim2.new(0.5, -170, 0.5, -160)
+    frame.Size = UDim2.new(0, 340, 0, 300)
+    frame.Position = UDim2.new(0.5, -170, 0.5, -150)
     frame.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
     frame.BorderSizePixel = 0
     frame.Active = true
     frame.Draggable = true
     frame.Parent = gui
 
-    local c1 = Instance.new("UICorner"); c1.CornerRadius = UDim.new(0, 12); c1.Parent = frame
-    local s1 = Instance.new("UIStroke"); s1.Color = Color3.fromRGB(60, 60, 80); s1.Parent = frame
+    local c1 = Instance.new("UICorner")
+    c1.CornerRadius = UDim.new(0, 12)
+    c1.Parent = frame
+
+    local s1 = Instance.new("UIStroke")
+    s1.Color = Color3.fromRGB(60, 60, 80)
+    s1.Parent = frame
 
     local grad = Instance.new("Frame")
     grad.Size = UDim2.new(1, 0, 0, 4)
     grad.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
     grad.BorderSizePixel = 0
     grad.Parent = frame
-    local cg = Instance.new("UICorner"); cg.CornerRadius = UDim.new(0, 12); cg.Parent = grad
+
+    local cg = Instance.new("UICorner")
+    cg.CornerRadius = UDim.new(0, 12)
+    cg.Parent = grad
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -40, 0, 30)
@@ -493,13 +619,20 @@ local function MakeUI()
     close.Position = UDim2.new(1, -35, 0, 17)
     close.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
     close.BorderSizePixel = 0
-    close.Text = "×"
+    close.Text = "x"
     close.Font = Enum.Font.GothamBold
     close.TextSize = 18
     close.TextColor3 = Color3.fromRGB(200, 200, 210)
     close.Parent = frame
-    local cc = Instance.new("UICorner"); cc.CornerRadius = UDim.new(0, 6); cc.Parent = close
-    close.MouseButton1Click:Connect(function() gui:Destroy(); _G.LUASEC_UI = nil end)
+
+    local cc = Instance.new("UICorner")
+    cc.CornerRadius = UDim.new(0, 6)
+    cc.Parent = close
+
+    close.MouseButton1Click:Connect(function()
+        gui:Destroy()
+        _G.LUASEC_UI = nil
+    end)
 
     local sub = Instance.new("TextLabel")
     sub.Size = UDim2.new(1, -40, 0, 18)
@@ -507,19 +640,25 @@ local function MakeUI()
     sub.BackgroundTransparency = 1
     sub.Font = Enum.Font.Gotham
     sub.TextSize = 12
-    sub.Text = "ใส่ Key ของคุณเพื่อเริ่มใช้งาน"
+    sub.Text = "Enter your key to start"
     sub.TextColor3 = Color3.fromRGB(140, 140, 160)
     sub.TextXAlignment = Enum.TextXAlignment.Left
     sub.Parent = frame
 
-    local boxHolder = Instance.new("Frame")
+        local boxHolder = Instance.new("Frame")
     boxHolder.Size = UDim2.new(1, -40, 0, 40)
     boxHolder.Position = UDim2.new(0, 20, 0, 75)
     boxHolder.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
     boxHolder.BorderSizePixel = 0
     boxHolder.Parent = frame
-    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = boxHolder
-    local bs = Instance.new("UIStroke"); bs.Color = Color3.fromRGB(60, 60, 80); bs.Parent = boxHolder
+
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(0, 8)
+    bc.Parent = boxHolder
+
+    local bs = Instance.new("UIStroke")
+    bs.Color = Color3.fromRGB(60, 60, 80)
+    bs.Parent = boxHolder
 
     local input = Instance.new("TextBox")
     input.Size = UDim2.new(1, -20, 1, 0)
@@ -562,8 +701,7 @@ local function MakeUI()
     btn.Position = UDim2.new(0, 20, 0, 170)
     btn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
     btn.BorderSizePixel = 0
-        --// ═══ ต่อจาก btn ═══
-    btn.Text = "ยืนยัน Key"
+    btn.Text = "Verify Key"
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 14
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -573,13 +711,12 @@ local function MakeUI()
     bcc.CornerRadius = UDim.new(0, 8)
     bcc.Parent = btn
 
-    --// Buy button
     local buyBtn = Instance.new("TextButton")
     buyBtn.Size = UDim2.new(1, -40, 0, 34)
     buyBtn.Position = UDim2.new(0, 20, 0, 220)
     buyBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
     buyBtn.BorderSizePixel = 0
-    buyBtn.Text = "ซื้อ Key"
+    buyBtn.Text = "Buy Key"
     buyBtn.Font = Enum.Font.GothamMedium
     buyBtn.TextSize = 13
     buyBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
@@ -589,19 +726,6 @@ local function MakeUI()
     buc.CornerRadius = UDim.new(0, 8)
     buc.Parent = buyBtn
 
-    --// Info label
-    local info = Instance.new("TextLabel")
-    info.Size = UDim2.new(1, -40, 0, 14)
-    info.Position = UDim2.new(0, 20, 0, 264)
-    info.BackgroundTransparency = 1
-    info.Font = Enum.Font.Gotham
-    info.TextSize = 10
-    info.Text = "Luasec v2"
-    info.TextColor3 = Color3.fromRGB(100, 100, 120)
-    info.TextXAlignment = Enum.TextXAlignment.Left
-    info.Parent = frame
-
-    --// ═══ Logic ═══
     local busy = false
 
     local function setStatus(msg, color)
@@ -611,70 +735,77 @@ local function MakeUI()
 
     local function setBusy(isBusy)
         busy = isBusy
-        btn.Text = isBusy and "กำลังตรวจสอบ..." or "ยืนยัน Key"
+        btn.Text = isBusy and "Checking..." or "Verify Key"
         btn.BackgroundColor3 = isBusy
             and Color3.fromRGB(60, 70, 160)
             or Color3.fromRGB(88, 101, 242)
         input.TextEditable = not isBusy
     end
 
-    --// ปุ่มยืนยัน
     btn.MouseButton1Click:Connect(function()
         if busy then return end
-        local key = input.Text
 
+        local key = input.Text
         if type(key) ~= "string" or #key < 8 or #key > 256 then
-            setStatus("Key ต้องมี 8-256 ตัวอักษร")
+            setStatus("Key must be 8-256 chars")
             return
         end
 
         setBusy(true)
-        setStatus("กำลังตรวจสอบ...", Color3.fromRGB(200, 200, 120))
+        setStatus("Verifying...", Color3.fromRGB(200, 200, 120))
 
         task.spawn(function()
             local decrypted, err = FetchAndLoad(key, SCRIPT_NAME_LOCKED)
             if not decrypted then
-                setStatus(err or "ผิดพลาด")
+                setStatus(err or "Error")
                 setBusy(false)
                 return
             end
 
-            setStatus("สำเร็จ!", Color3.fromRGB(100, 255, 100))
+            setStatus("Success!", Color3.fromRGB(100, 255, 100))
             task.wait(0.3)
             LoadScript(decrypted, key)
         end)
     end)
 
-    --// ปุ่มซื้อ Key
     buyBtn.MouseButton1Click:Connect(function()
         task.spawn(function()
             local hwid = GetHWID()
             local r, err = postJSON("/api/start", { hwid = hwid })
             if not r then
-                setStatus(err or "เปิดลิงก์ไม่ได้")
+                setStatus(err or "Cannot open link")
                 return
             end
             if r.status ~= 200 or not r.data.url then
-                setStatus(r.data.error or "เปิดลิงก์ไม่ได้")
+                setStatus(r.data.error or "Cannot open link")
                 return
             end
-
             local url = r.data.url
             if SafeSetClipboard then
                 pcall(SafeSetClipboard, url)
-                setStatus("คัดลอกลิงก์แล้ว!", Color3.fromRGB(100, 200, 255))
+                setStatus("Link copied!", Color3.fromRGB(100, 200, 255))
             else
-                setStatus("ลิงก์: " .. url:sub(1, 40), Color3.fromRGB(100, 200, 255))
-            end
-        end)
-    end)
-
-    --// Enter = submit
-    input.Focused:Connect(function()
-        UserInput.InputBegan:Connect(function(k)
-            if k.KeyCode == Enum.KeyCode.Return then
-                btn:Activate()
+                setStatus("Link: " .. url:sub(1, 40), Color3.fromRGB(100, 200, 255))
             end
         end)
     end)
 end
+-- ===========================================================
+-- MAIN
+-- ===========================================================
+if USER_KEY == "" then
+    print("[Luasec] No key, opening UI")
+    MakeUI()
+    return
+end
+
+task.spawn(function()
+    local decrypted, err = FetchAndLoad(USER_KEY, SCRIPT_NAME_LOCKED)
+    if not decrypted then
+        print("[Luasec] Auto-load failed:", err)
+        MakeUI()
+        return
+    end
+
+    LoadScript(decrypted, USER_KEY)
+end)
