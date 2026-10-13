@@ -48,7 +48,8 @@ if type(RealWriteFile) == "function" then
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealWriteFile)
-        if ok and hooked then
+        local loaderMonitor = getgenv().LuasecWriteMonitor
+        if ok and hooked and loaderMonitor ~= RealWriteFile then
             return Players.LocalPlayer:Kick("[Luasec] L4: writefile hooked")
         end
     end
