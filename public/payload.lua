@@ -1,5 +1,5 @@
 -- ===========================================================
--- Luasec Payload — UI + Platoboost + Anti (Signal + T-RAWSET)
+-- Luasec Payload — UI + Platoboost + Anti-Save (แบบไฟล์ X)
 -- ===========================================================
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -39,6 +39,8 @@ local RealHookFunction = hookfunction
 local RealRawset = rawset
 local RealRawget = rawget
 local RealLoadstring = loadstring
+local RealDelfile = delfile
+local RealIsFile = isfile
 
 -- ═══ L4-L6: hook check ═══
 if type(RealWriteFile) == "function" then
@@ -82,54 +84,51 @@ end
 
 print("[Luasec] Payload L1-L6 passed")
 
--- ═══ Anti-Save in payload (Signal + Size) ═══
-local SIZE_THRESHOLD = 15000
+-- ===========================================================
+-- Anti-Save — Signal-based (แบบไฟล์ X 100%)
+-- ===========================================================
+local env = getgenv()
 
-local ALLOWLIST_PATTERNS = {
-    "clientsettings", "rbx", "config",
-    "user", "settings", "preferences",
-}
+local saved = env.Signal.new()
+local target = env.writefile
+local oldWrite
 
-local function isAllowlisted(path)
-    if type(path) ~= "string" then return false end
-    local lower = path:lower()
-    if #lower < 3 then return true end
-    for _, pat in ipairs(ALLOWLIST_PATTERNS) do
-        if lower:find(pat, 1, true) then return true end
+oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
+    local result = table.pack(pcall(oldWrite, path, contents, ...))
+    local success = result[1] and result[2] ~= false
+
+    if success then
+        saved:Fire({
+            api = "writefile",
+            path = tostring(path),
+            bytes = typeof(contents) == "string" and #contents or nil,
+        })
     end
-    if lower:match("%.log$") then return true end
-    if lower:match("%.cfg$") then return true end
-    if lower:match("%.ini$") then return true end
-    return false
-end
 
-local RealListFiles = listfiles
-local RealReadFile = readfile
-local RealDelfile = delfile
-local RealIsFile = isfile
-local RealNewCClosure = newcclosure
+    if not result[1] then
+        error(result[2], 0)
+    end
+    return table.unpack(result, 2, result.n)
+end))
 
-local function scanAndKill()
-    if type(RealListFiles) ~= "function" then return false end
-    local ok, files = pcall(RealListFiles, ".")
-    if not ok or type(files) ~= "table" then return false end
+saved:Connect(function(event)
+    print("[Luasec] writefile detected:", event.path, event.bytes, "bytes")
 
-    for _, file in ipairs(files) do
-        if not file:match("^luasec_") and not isAllowlisted(file) then
-            local readOk, content = pcall(RealReadFile, file)
-            if readOk and type(content) == "string" and #content >= SIZE_THRESHOLD then
-                pcall(RealDelfile, file)
-                LuasecSignal.OnDetect:Fire({
-                    type = "payload_save",
-                    path = file,
-                    size = #content,
-                })
-                return true
+    if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
+        pcall(function()
+            if RealIsFile(event.path) then
+                RealDelfile(event.path)
             end
-        end
+        end)
     end
-    return false
-end
+
+    pcall(function()
+        Players.LocalPlayer:Kick("[Luasec] File save blocked. Access denied.")
+    end)
+
+    task.wait(0.3)
+    if NfCrash then NfCrash() else while true do end end
+end)
 
 -- ═══ Locals ═══
 local SCRIPT_NAME = getgenv().script or _G.script
@@ -460,11 +459,6 @@ local function LoadScript(decrypted, key)
             task.wait(10)
             if not HeartbeatAlive then break end
 
-            -- Anti-Save scan
-            if scanAndKill() then
-                return KickPlayer("[Luasec] Payload save detected.", 1)
-            end
-
             -- T13
             if SafeGetGenv().loadstring ~= SafeLoadstring then
                 return KickPlayer("loadstring changed", 1)
@@ -597,18 +591,26 @@ local function MakeUI()
     frame.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
     frame.BorderSizePixel = 0
     frame.Active = true
-    frame.Draggable = true
+        frame.Draggable = true
     frame.Parent = gui
 
-    local c1 = Instance.new("UICorner"); c1.CornerRadius = UDim.new(0, 12); c1.Parent = frame
-    local s1 = Instance.new("UIStroke"); s1.Color = Color3.fromRGB(60, 60, 80); s1.Parent = frame
+    local c1 = Instance.new("UICorner")
+    c1.CornerRadius = UDim.new(0, 12)
+    c1.Parent = frame
+
+    local s1 = Instance.new("UIStroke")
+    s1.Color = Color3.fromRGB(60, 60, 80)
+    s1.Parent = frame
 
     local grad = Instance.new("Frame")
     grad.Size = UDim2.new(1, 0, 0, 4)
     grad.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
     grad.BorderSizePixel = 0
     grad.Parent = frame
-    local cg = Instance.new("UICorner"); cg.CornerRadius = UDim.new(0, 12); cg.Parent = grad
+
+    local cg = Instance.new("UICorner")
+    cg.CornerRadius = UDim.new(0, 12)
+    cg.Parent = grad
 
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, -40, 0, 30)
@@ -631,8 +633,15 @@ local function MakeUI()
     close.TextSize = 18
     close.TextColor3 = Color3.fromRGB(200, 200, 210)
     close.Parent = frame
-    local cc = Instance.new("UICorner"); cc.CornerRadius = UDim.new(0, 6); cc.Parent = close
-    close.MouseButton1Click:Connect(function() gui:Destroy(); _G.LUASEC_UI = nil end)
+
+    local cc = Instance.new("UICorner")
+    cc.CornerRadius = UDim.new(0, 6)
+    cc.Parent = close
+
+    close.MouseButton1Click:Connect(function()
+        gui:Destroy()
+        _G.LUASEC_UI = nil
+    end)
 
     local sub = Instance.new("TextLabel")
     sub.Size = UDim2.new(1, -40, 0, 18)
@@ -651,8 +660,14 @@ local function MakeUI()
     boxHolder.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
     boxHolder.BorderSizePixel = 0
     boxHolder.Parent = frame
-    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 8); bc.Parent = boxHolder
-    local bs = Instance.new("UIStroke"); bs.Color = Color3.fromRGB(60, 60, 80); bs.Parent = boxHolder
+
+    local bc = Instance.new("UICorner")
+    bc.CornerRadius = UDim.new(0, 8)
+    bc.Parent = boxHolder
+
+    local bs = Instance.new("UIStroke")
+    bs.Color = Color3.fromRGB(60, 60, 80)
+    bs.Parent = boxHolder
 
     local input = Instance.new("TextBox")
     input.Size = UDim2.new(1, -20, 1, 0)
@@ -700,7 +715,10 @@ local function MakeUI()
     btn.TextSize = 14
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.Parent = frame
-    local bcc = Instance.new("UICorner"); bcc.CornerRadius = UDim.new(0, 8); bcc.Parent = btn
+
+    local bcc = Instance.new("UICorner")
+    bcc.CornerRadius = UDim.new(0, 8)
+    bcc.Parent = btn
 
     local buyBtn = Instance.new("TextButton")
     buyBtn.Size = UDim2.new(1, -40, 0, 34)
@@ -712,7 +730,10 @@ local function MakeUI()
     buyBtn.TextSize = 13
     buyBtn.TextColor3 = Color3.fromRGB(200, 200, 220)
     buyBtn.Parent = frame
-    local buc = Instance.new("UICorner"); buc.CornerRadius = UDim.new(0, 8); buc.Parent = buyBtn
+
+    local buc = Instance.new("UICorner")
+    buc.CornerRadius = UDim.new(0, 8)
+    buc.Parent = buyBtn
 
     local busy = false
     local function setStatus(msg, color)
@@ -762,7 +783,9 @@ local function MakeUI()
     end)
 end
 
--- ═══ MAIN ═══
+-- ===========================================================
+-- MAIN
+-- ===========================================================
 if USER_KEY == "" then
     print("[Luasec] No key, opening UI")
     MakeUI()
