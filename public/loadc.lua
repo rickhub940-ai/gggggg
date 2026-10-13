@@ -1,91 +1,68 @@
 -- ===========================================================
--- Luasec LoadC — write monitor before loading loader.lua
+-- Luasec LoadC — monitor writefile before loading loader.lua
+-- Uses the same Signal.new + hookfunction flow as X.lua.
 -- ===========================================================
 local Players = game:GetService("Players")
-
 local BASE_URL = "https://keysytemdemo.vercel.app"
 
-local function createSignal()
-    local signal = {}
-    local connections = {}
-    local nextId = 0
-
-    function signal:Connect(fn)
-        if type(fn) ~= "function" then return { Disconnect = function() end } end
-        nextId = nextId + 1
-        local id = nextId
-        connections[id] = fn
-        return { Disconnect = function() connections[id] = nil end }
-    end
-
-    function signal:Fire(...)
-        for _, fn in pairs(connections) do
-            pcall(fn, ...)
-        end
-    end
-
-    return signal
+local env = getgenv()
+if type(env.Signal) ~= "table" or type(env.Signal.new) ~= "function" then
+    return Players.LocalPlayer:Kick("[Luasec] Signal.new unavailable")
+end
+if type(env.writefile) ~= "function" or type(hookfunction) ~= "function"
+    or type(newcclosure) ~= "function" then
+    return Players.LocalPlayer:Kick("[Luasec] Write monitor unavailable")
 end
 
-local LuasecSignal = {
-    OnDetect = createSignal(),
-    OnKick = createSignal(),
-    OnLog = createSignal(),
-    OnHookDetected = createSignal(),
-}
-getgenv().LuasecSignal = LuasecSignal
+local saved = env.Signal.new()
+local target = env.writefile
+local RealIsFile = isfile
+local RealDelfile = delfile
+local oldWrite
 
-local function terminate(reason)
+oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
+    local result = table.pack(pcall(oldWrite, path, contents, ...))
+    local success = result[1] and result[2] ~= false
+
+    if success then
+        saved:Fire({
+            api = "writefile",
+            path = tostring(path),
+            bytes = typeof(contents) == "string" and #contents or nil,
+        })
+    end
+
+    if not result[1] then
+        error(result[2], 0)
+    end
+    return table.unpack(result, 2, result.n)
+end))
+
+-- This is intentionally the X.lua event flow. The only behavioral change from
+-- the supplied file is replacing print(...) with cleanup and termination.
+saved:Connect(function(event)
+    if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
+        pcall(function()
+            if RealIsFile(event.path) then
+                RealDelfile(event.path)
+            end
+        end)
+    end
+
     pcall(function()
-        Players.LocalPlayer:Kick("[Luasec] " .. tostring(reason))
+        Players.LocalPlayer:Kick("[Luasec] Source save detected: " .. tostring(event.path))
     end)
     task.wait(0.3)
     if NfCrash then NfCrash() else while true do end end
-end
-
-LuasecSignal.OnDetect:Connect(function(event)
-    if event.type ~= "payload_save" then return end
-
-    -- The monitor is called before the original writefile. This cleanup also
-    -- removes an older file if the attempted path already exists.
-    if type(delfile) == "function" and type(event.path) == "string" then
-        pcall(delfile, event.path)
-    end
-    terminate("Source save blocked: " .. tostring(event.path))
 end)
 
-local RealWriteFile = writefile
-local RealHookFunction = hookfunction
-local RealNewCClosure = newcclosure
-if type(RealWriteFile) ~= "function"
-    or type(RealHookFunction) ~= "function"
-    or type(RealNewCClosure) ~= "function" then
-    return terminate("Write monitor unavailable")
-end
-
-local originalWrite
-local installed = pcall(function()
-    originalWrite = RealHookFunction(RealWriteFile, RealNewCClosure(function(path, contents, ...)
-        LuasecSignal.OnDetect:Fire({
-            type = "payload_save",
-            api = "writefile",
-            path = tostring(path),
-            size = typeof(contents) == "string" and #contents or nil,
-        })
-        error("[Luasec] writefile blocked", 0)
-    end))
-end) and type(originalWrite) == "function"
-
-if not installed then
-    return terminate("Write monitor installation failed")
-end
-
--- The loader and payload recognize this monitor as the one installed by LoadC.
-getgenv().LuasecWriteMonitor = RealWriteFile
+-- Let loader.lua and payload.lua recognize this monitor as the monitor that
+-- LoadC itself registered.
+getgenv().LuasecWriteMonitor = target
 
 local requestFn = (syn and syn.request) or (http and http.request) or request or http_request
 if type(requestFn) ~= "function" then
-    return terminate("HTTP not supported")
+    return Players.LocalPlayer:Kick("[Luasec] HTTP not supported")
 end
 
 local ok, response = pcall(requestFn, {
@@ -93,20 +70,20 @@ local ok, response = pcall(requestFn, {
     Method = "GET",
 })
 if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
-    return terminate("Loader fetch failed")
+    return Players.LocalPlayer:Kick("[Luasec] Loader fetch failed")
 end
 
 local source = response.Body or ""
 if #source < 100 then
-    return terminate("Invalid loader")
+    return Players.LocalPlayer:Kick("[Luasec] Invalid loader")
 end
 
 local chunk = loadstring(source)
 if type(chunk) ~= "function" then
-    return terminate("Loader compile failed")
+    return Players.LocalPlayer:Kick("[Luasec] Loader compile failed")
 end
 
 local runOk = pcall(chunk)
 if not runOk then
-    return terminate("Loader runtime error")
+    return Players.LocalPlayer:Kick("[Luasec] Loader runtime error")
 end
