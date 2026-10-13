@@ -6,7 +6,11 @@
     }
   },
   "redirects": [
-    { "source": "/", "destination": "https://yura.lol/09ms", "permanent": false }
+    {
+      "source": "/",
+      "destination": "https://yura.lol/09ms",
+      "permanent": false
+    }
   ],
   "rewrites": [
     { "source": "/payload.lua",        "destination": "/api/auth?action=payload"        },
