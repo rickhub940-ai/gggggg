@@ -13,6 +13,16 @@ const sessions = new Map();
 const SESSION_TTL = 30 * 60 * 1000;
 const RUNTIME_TTL = 60 * 1000;
 
+// Per-component reversible transforms used for the client challenge response.
+// Their inverses live on the client; none of these are an authorization secret.
+const RNG_CHALLENGE = Object.freeze([
+  { multiplier: 2, offset: -32 },
+  { multiplier: 5, offset: 256 },
+  { multiplier: 3, offset: -17 },
+  { multiplier: 7, offset: 19 },
+  { multiplier: 11, offset: -101 },
+]);
+
 // ═══ Rate limit ═══
 const rateLimit = new Map();
 const RATE_WINDOW = 60 * 1000;
@@ -256,12 +266,10 @@ async function handleScript(req, res, ip) {
     .replace(/\$\{HWIDHASH\}/g, payload.hwidHash)
     .replace(/\$\{ISSUED\}/g, new Date().toISOString());
 
-  // The client restores a check component with floor(2 * value + 0.5).
-  // Encode each integer so that this exact inverse operation returns the
-  // original RNG value. The previous code applied the inverse on both sides,
-  // turning every value into roughly 4x itself and rejecting valid keys.
-  let check = '0|0|0|0|0';
-  check = rngValues.map((value) => (value - 0.5) / 2).join('|');
+  const check = rngValues.map((value, index) => {
+    const { multiplier, offset } = RNG_CHALLENGE[index];
+    return (value * multiplier) + offset;
+  }).join('|');
 
   return res.status(200).json(encodePayload({
     Valid: true,

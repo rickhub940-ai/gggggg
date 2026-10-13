@@ -368,7 +368,14 @@ local function Equate(X)
     return (Y * 7919 + 1234567) % 100000000000003
 end
 
-local function inverse(y) return ((y * 20) + 5) / 10 end
+local ChallengeMultipliers = { 2, 5, 3, 7, 11 }
+local ChallengeOffsets = { -32, 256, -17, 19, -101 }
+local function RestoreChallenge(index, value)
+    if type(value) ~= "number" then return nil end
+    local restored = (value - ChallengeOffsets[index]) / ChallengeMultipliers[index]
+    if restored % 1 ~= 0 then return nil end
+    return restored
+end
 local function GetRngSeed() return math.random(1, 1000000) end
 
 local function E1() return tonumber(#game:GetService("Workspace"):GetChildren()) end
@@ -421,8 +428,12 @@ local function postJSON(path, payload)
     })
     if not ok or type(res) ~= "table" then return nil, "Connection failed" end
     local status = res.StatusCode or res.Status
+    local responseBody = res.Body
+    if type(status) ~= "number" or type(responseBody) ~= "string" then
+        return nil, "Malformed response"
+    end
     local decoded
-    local ok2 = pcall(function() decoded = HttpService:JSONDecode(res.Body or "{}") end)
+    local ok2 = pcall(function() decoded = HttpService:JSONDecode(responseBody) end)
     if not ok2 then return nil, "Invalid response" end
     return { status = status, data = decoded, body = res.Body or "" }, nil
 end
@@ -475,6 +486,7 @@ end
 
 local function FetchAndLoad(key, sname)
     if not ChecksActive then return nil, "Cancelled" end
+    local authScope = 0
     local hwid = GetHWID()
     local userId = tostring(Players.LocalPlayer.UserId)
 
@@ -490,6 +502,7 @@ local function FetchAndLoad(key, sname)
     if r1.status ~= 200 or r1.data.valid ~= true then
         return nil, r1.data.message or r1.data.error or "Invalid key"
     end
+    authScope = authScope + 1
     if not ChecksActive then return nil, "Cancelled" end
 
     Ticket = r1.data.ticket
@@ -524,20 +537,22 @@ local function FetchAndLoad(key, sname)
 
     if not okDec or type(decrypted) ~= "table" then return nil, "Decode failed" end
     if decrypted.Valid ~= true then return nil, decrypted.reason or "Server rejected" end
+    authScope = authScope + 1
 
-    if decrypted.check then
-        local parts = Split(decrypted.check, "|")
-        if #parts >= 5 then
-            local okCheck =
-                SecureEQ(math.floor(inverse(tonumber(parts[1]))), rng.Rng1) and
-                SecureEQ(math.floor(inverse(tonumber(parts[2]))), rng.Rng2) and
-                SecureEQ(math.floor(inverse(tonumber(parts[3]))), rng.Rng3) and
-                SecureEQ(math.floor(inverse(tonumber(parts[4]))), rng.Rng4) and
-                SecureEQ(math.floor(inverse(tonumber(parts[5]))), rng.Rng5)
-            if not okCheck then return nil, "RNG check failed" end
+    if type(decrypted.check) ~= "string" then return nil, "RNG challenge missing" end
+    local parts = Split(decrypted.check, "|")
+    if #parts ~= 5 then return nil, "RNG challenge malformed" end
+
+    local rngOriginals = { rng.Rng1, rng.Rng2, rng.Rng3, rng.Rng4, rng.Rng5 }
+    for index = 1, 5 do
+        local restored = RestoreChallenge(index, tonumber(parts[index]))
+        if restored == nil or not SecureEQ(restored, rngOriginals[index]) then
+            return nil, "RNG check failed"
         end
     end
 
+    authScope = authScope + 1
+    if authScope ~= 3 then return nil, "Authentication flow interrupted" end
     return decrypted
 end
 
