@@ -4,7 +4,7 @@ const path = require('node:path');
 
 const { verifyKey, createLink } = require('../lib/platoboost');
 const { issueTicket, verifyTicket, hashHwid } = require('../lib/ticket');
-const { xorCipher, b64encode, b64decode, inverse } = require('../lib/crypto');
+const { xorCipher, b64encode, b64decode } = require('../lib/crypto');
 const {
   revokeHwid, revokeUser, revokeIp, checkRevoked, stats,
 } = require('../lib/revoke');
@@ -148,8 +148,8 @@ async function handleVerify(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
   const { key, hwid, userId, scriptName } = req.body || {};
 
-  if (typeof key !== 'string' || key.length < 8 || key.length > 256)
-    return res.status(400).json({ valid: false, error: 'invalid key format' });
+  if (typeof key !== 'string' || !key.trim())
+    return res.status(400).json({ valid: false, error: 'key required' });
   if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
     return res.status(400).json({ valid: false, error: 'invalid hwid format' });
   if (typeof scriptName !== 'string' || scriptName.length < 1 || scriptName.length > 64)
@@ -243,15 +243,15 @@ async function handleScript(req, res, ip) {
     .replace(/\$\{HWIDHASH\}/g, payload.hwidHash)
     .replace(/\$\{ISSUED\}/g, new Date().toISOString());
 
+  // The client restores a check component with floor(2 * value + 0.5).
+  // Encode each integer so that this exact inverse operation returns the
+  // original RNG value. The previous code applied the inverse on both sides,
+  // turning every value into roughly 4x itself and rejecting valid keys.
   let check = '0|0|0|0|0';
-  if (clientData && typeof clientData.Rng1 === 'number') {
-    check = [
-      Math.floor(inverse(clientData.Rng1)),
-      Math.floor(inverse(clientData.Rng2)),
-      Math.floor(inverse(clientData.Rng3)),
-      Math.floor(inverse(clientData.Rng4)),
-      Math.floor(inverse(clientData.Rng5)),
-    ].join('|');
+  const rngValues = clientData && ['Rng1', 'Rng2', 'Rng3', 'Rng4', 'Rng5']
+    .map((name) => clientData[name]);
+  if (rngValues && rngValues.every(Number.isSafeInteger)) {
+    check = rngValues.map((value) => (value - 0.5) / 2).join('|');
   }
 
   return res.status(200).json(encodePayload({

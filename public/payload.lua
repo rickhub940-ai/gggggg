@@ -712,8 +712,8 @@ local function MakeUI()
     btn.MouseButton1Click:Connect(function()
         if busy then return end
         local key = input.Text
-        if type(key) ~= "string" or #key < 8 or #key > 256 then
-            setStatus("Key must be 8-256 chars"); return
+        if type(key) ~= "string" or key:match("^%s*$") then
+            setStatus("Enter a key"); return
         end
         setBusy(true)
         setStatus("Verifying...", Color3.fromRGB(200, 200, 120))
