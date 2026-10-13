@@ -13,6 +13,7 @@ const sessions = new Map();
 const SESSION_TTL = 30 * 60 * 1000;
 const RUNTIME_TTL = 60 * 1000;
 
+// ═══ Rate limit ═══
 const rateLimit = new Map();
 const RATE_WINDOW = 60 * 1000;
 const RATE_MAX = 15;
@@ -37,6 +38,7 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000).unref?.();
 
+// ═══ Trap redirect ═══
 const TRAP_URL = 'https://yura.lol/09ms';
 
 function trapRedirect(res) {
@@ -45,6 +47,7 @@ function trapRedirect(res) {
   return res.status(302).send('');
 }
 
+// ═══ Browser check ═══
 function isBrowserRequest(req) {
   const headers = req.headers || {};
   const ua = (headers['user-agent'] || '').toLowerCase();
@@ -61,15 +64,12 @@ function isBrowserRequest(req) {
   return false;
 }
 
+// ═══ Main handler ═══
 module.exports = async function handler(req, res) {
   const url = new URL(req.url, 'http://x');
   const action = req.query?.action || url.searchParams.get('action');
 
-  if (action === 'ping') {
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).send('luasec_pong_v1');
-  }
-
+  // ═══ PAYLOAD (GET) ═══
   if (action === 'payload') {
     if (isBrowserRequest(req)) return trapRedirect(res);
     try {
@@ -84,6 +84,7 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // ═══ อื่นๆ: ต้อง POST ═══
   if (req.method !== 'POST') return trapRedirect(res);
   if (isBrowserRequest(req)) return trapRedirect(res);
 
@@ -120,6 +121,7 @@ module.exports = async function handler(req, res) {
   }
 };
 
+// ═══ Codec ═══
 function decodePayload(body, xorKey) {
   try {
     const { Data } = body || {};
@@ -141,6 +143,7 @@ function encodePayload(data, xorKey) {
   return { Data: bytes };
 }
 
+// ═══ /api/verify ═══
 async function handleVerify(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
   const { key, hwid, userId, scriptName } = req.body || {};
@@ -176,6 +179,7 @@ async function handleVerify(req, res, ip) {
   return res.status(200).json({ valid: true, ticket, k: xorKey });
 }
 
+// ═══ /api/script ═══
 async function handleScript(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
   const { ticket, Data, scriptName } = req.body || {};
@@ -261,6 +265,7 @@ async function handleScript(req, res, ip) {
   }, xorKey));
 }
 
+// ═══ /api/script-verify ═══
 async function handleScriptVerify(req, res) {
   const { ticket, hwid, scriptToken, runtimeSecret, scriptName } = req.body || {};
 
@@ -312,6 +317,7 @@ async function handleScriptVerify(req, res) {
   return res.status(200).json({ valid: true, serverId: payload.jti });
 }
 
+// ═══ /api/heartbeat ═══
 async function handleHeartbeat(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
   const { ticket, Data } = req.body || {};
@@ -363,6 +369,7 @@ async function handleHeartbeat(req, res, ip) {
   }, xorKey));
 }
 
+// ═══ /api/start ═══
 async function handleStart(req, res, ip) {
   const { hwid } = req.body || {};
 
@@ -385,6 +392,7 @@ async function handleStart(req, res, ip) {
   }
 }
 
+// ═══ /api/admin/ban ═══
 async function handleAdminBan(req, res) {
   const token = req.headers['x-admin-token'];
   const expected = process.env.ADMIN_TOKEN;
@@ -408,4 +416,4 @@ async function handleAdminBan(req, res) {
     value: value.slice(0, 20) + (value.length > 20 ? '...' : ''),
     stats: stats(),
   });
-}
+    }
