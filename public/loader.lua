@@ -115,9 +115,7 @@ local function checkFunction(fn, name)
     if not info or info.what ~= "C" then return false, "not C function" end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, fn)
-        local trustedWriteMonitor = name == "writefile"
-            and RealGetGenv().LuasecWriteMonitor == fn
-        if ok and hooked and not trustedWriteMonitor then return false, "hooked" end
+        if ok and hooked then return false, "hooked" end
     end
     if RealGetGenv()[name] and RealGetGenv()[name] ~= fn then
         return false, "getgenv replaced"
@@ -264,8 +262,7 @@ do
         end
         if type(RealIsHooked) == "function" then
             local ok, hooked = pcall(RealIsHooked, RealWriteFile)
-            local trustedWriteMonitor = SafeGetGenv().LuasecWriteMonitor == RealWriteFile
-            if ok and hooked and not trustedWriteMonitor then
+            if ok and hooked then
                 return Players.LocalPlayer:Kick("[Luasec] T14: writefile hooked")
             end
         end
@@ -391,9 +388,8 @@ end
 
 local HttpRequest = RealHttpRequest
 
--- ═══ Anti-Save ═══
--- The write monitor is installed by public/loadc.lua before this loader is
--- compiled. Loader only verifies that the trusted monitor remains intact.
+-- ═══ Stage 3: Anti checks ═══
+-- Stage 2 (savecheck.lua) has already completed its filesystem scan.
 
 -- ═══ สร้าง Loader Proof ═══
 do
@@ -409,7 +405,6 @@ end
 -- ═══ T-RAWSET4: Luasec flags integrity snapshot ═══
 local LuasecFlagSnapshot = {
     LuasecSignal = getgenv().LuasecSignal,
-    LuasecWriteMonitor = getgenv().LuasecWriteMonitor,
     LuasecLoaderProof = getgenv().LuasecLoaderProof,
     LuasecLoaderMarker = getgenv().LuasecLoaderMarker,
     LuasecLoaderTime = getgenv().LuasecLoaderTime,
@@ -418,10 +413,6 @@ local LuasecFlagSnapshot = {
 local function checkLuasecFlags()
     if getgenv().LuasecSignal ~= LuasecFlagSnapshot.LuasecSignal then
         return false, "LuasecSignal replaced"
-    end
-    if getgenv().LuasecWriteMonitor ~= LuasecFlagSnapshot.LuasecWriteMonitor
-        or LuasecFlagSnapshot.LuasecWriteMonitor ~= RealWriteFile then
-        return false, "write monitor replaced"
     end
     if getgenv().LuasecLoaderProof ~= LuasecFlagSnapshot.LuasecLoaderProof then
         return false, "LuasecLoaderProof replaced"
