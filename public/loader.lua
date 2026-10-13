@@ -177,6 +177,47 @@ end
 local SafeLoadstring = RealLoadstring
 local SafeGetGenv = RealGetGenv
 
+-- A loadstring hook installed before this loader starts can make a C-closure
+-- check pass. Probe it with a temporary writefile interceptor: source-saving
+-- wrappers (including the common `writefile(..., chunk)` pattern) will attempt
+-- to write the probe and are rejected before the payload is fetched.
+local function loadstringWritesSource()
+    if type(SafeLoadstring) ~= "function" or type(RealWriteFile) ~= "function" then
+        return false
+    end
+
+    local env = SafeGetGenv()
+    if type(env) ~= "table" or env.writefile ~= RealWriteFile then
+        return false
+    end
+
+    local originalWrite = env.writefile
+    local wroteDuringProbe = false
+    local interceptor = function(...)
+        wroteDuringProbe = true
+        -- Do not create the probe file. The wrapper only needs a successful
+        -- return value to continue, then the loader can terminate safely.
+        return true
+    end
+
+    local installed = pcall(function()
+        env.writefile = interceptor
+    end) and env.writefile == interceptor
+    if not installed then
+        pcall(function() env.writefile = originalWrite end)
+        return false
+    end
+
+    local compiledOk, compiled = pcall(SafeLoadstring, "-- Luasec source-save probe\nreturn true")
+    pcall(function() env.writefile = originalWrite end)
+
+    -- Leave the existing T13 checks to report a broken loadstring implementation.
+    if not compiledOk or type(compiled) ~= "function" then
+        return false
+    end
+    return wroteDuringProbe
+end
+
 do
     if type(SafeLoadstring) ~= "function" then
         return Players.LocalPlayer:Kick("[Luasec] T13: loadstring missing")
@@ -193,6 +234,9 @@ do
     end
     if SafeGetGenv().loadstring ~= SafeLoadstring then
         return Players.LocalPlayer:Kick("[Luasec] T13: getgenv().loadstring replaced")
+    end
+    if loadstringWritesSource() then
+        return Players.LocalPlayer:Kick("[Luasec] T13: loadstring attempted to save source")
     end
     local ok, fn = pcall(SafeLoadstring, "return 1 + 1")
     if not ok or type(fn) ~= "function" then
