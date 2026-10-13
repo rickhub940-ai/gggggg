@@ -54,7 +54,7 @@ local ok, res = pcall(req, {
         hwid = getHWID(),
         scriptToken = ScriptToken,
         runtimeSecret = RuntimeSecret,
-        scriptName = "bloxfruits",
+        scriptName = "main",
     }),
 })
 
@@ -75,4 +75,4 @@ end
 print("[Luasec] Blox Fruits loaded!")
 print("[Luasec] Session: ${SERVERID}")
 
--- โค้ดของคุณ...
+-- โค้ดของคุ
