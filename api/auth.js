@@ -1,10 +1,11 @@
 // ═══════════════════════════════════════════════════════════
-// Luasec Auth API — Free Key + Require Script Name
+// Luasec Auth API — Platoboost + Ticket + Runtime Secret
 // ═══════════════════════════════════════════════════════════
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { verifyKey, createLink } = require('../lib/platoboost');
 const { issueTicket, verifyTicket, hashHwid } = require('../lib/ticket');
 const { xorCipher, b64encode, b64decode, inverse } = require('../lib/crypto');
 const {
@@ -61,6 +62,7 @@ module.exports = async function handler(req, res) {
       case 'script':         return await handleScript(req, res, ip);
       case 'script-verify':  return await handleScriptVerify(req, res);
       case 'heartbeat':      return await handleHeartbeat(req, res, ip);
+      case 'start':          return await handleStart(req, res);
       case 'admin-ban':      return await handleAdminBan(req, res);
       case 'list':           return await handleList(req, res);
       default:
@@ -95,16 +97,18 @@ function encodePayload(data, xorKey) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/verify
+// POST /api/verify — ตรวจ key กับ Platoboost → ออก ticket
 // ═══════════════════════════════════════════════════════════
 async function handleVerify(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
-  const { hwid, userId, scriptName } = req.body || {};
+  const { key, hwid, userId, scriptName } = req.body || {};
+
+  if (typeof key !== 'string' || key.length < 8 || key.length > 256)
+    return res.status(400).json({ valid: false, error: 'invalid key format' });
 
   if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
     return res.status(400).json({ valid: false, error: 'invalid hwid format' });
 
-  // ── ต้องส่ง scriptName ───────────────────────────────────
   if (typeof scriptName !== 'string' || scriptName.length < 1 || scriptName.length > 64)
     return res.status(400).json({ valid: false, error: 'scriptName required' });
 
@@ -118,11 +122,20 @@ async function handleVerify(req, res, ip) {
   if (reason)
     return res.status(403).json({ valid: false, message: 'Banned: ' + reason });
 
+  // ═══ ตรวจ key กับ Platoboost ═══
+  const result = await verifyKey(key, hwid);
+  if (!result.valid) {
+    return res.status(result.rateLimited ? 429 : 200).json({
+      valid: false,
+      message: result.message || 'Invalid key',
+    });
+  }
+
   const ticket = issueTicket({
     hwidHash: hashHwid(hwid),
     scope: 'script',
     userId: userId || null,
-    scriptName,  // ฝังใน ticket ด้วย
+    scriptName,
   });
 
   return res.status(200).json({ valid: true, ticket, k: xorKey });
@@ -147,7 +160,6 @@ async function handleScript(req, res, ip) {
   if (reason)
     return res.status(403).json({ Valid: false, reason: 'Banned: ' + reason });
 
-  // ── ตรวจ scriptName ต้องตรงกับ ticket ────────────────────
   const name = (typeof scriptName === 'string' && scriptName.length > 0)
     ? scriptName
     : payload.scriptName;
@@ -229,7 +241,7 @@ async function handleScript(req, res, ip) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// POST /api/script-verify
+// POST /api/script-verify — main.lua เรียก
 // ═══════════════════════════════════════════════════════════
 async function handleScriptVerify(req, res) {
   const { ticket, hwid, scriptToken, runtimeSecret, scriptName } = req.body || {};
@@ -247,7 +259,6 @@ async function handleScriptVerify(req, res) {
   if (reason)
     return res.status(403).json({ valid: false, reason: 'Banned: ' + reason });
 
-  // ── scriptName check ────────────────────────────────────
   if (typeof scriptName === 'string' && scriptName !== session.scriptName) {
     return res.status(403).json({ valid: false, reason: 'scriptName changed' });
   }
@@ -316,7 +327,6 @@ async function handleHeartbeat(req, res, ip) {
     } else {
       session.failCount = 0;
 
-      // ═══ T19: ตรวจ scriptName ═══
       const sentName = decoded.data?.scriptName;
       if (typeof sentName !== 'string' || sentName !== session.scriptName) {
         sessions.delete(payload.jti);
@@ -338,6 +348,23 @@ async function handleHeartbeat(req, res, ip) {
   return res.status(200).json(encodePayload({
     Valid: true, commands: [], t: Date.now(),
   }, xorKey));
+}
+
+// ═══════════════════════════════════════════════════════════
+// POST /api/start — สร้างลิงก์ซื้อ key
+// ═══════════════════════════════════════════════════════════
+async function handleStart(req, res) {
+  const { hwid } = req.body || {};
+  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
+    return res.status(400).json({ error: 'invalid hwid' });
+
+  try {
+    const result = await createLink(hwid);
+    return res.status(result.rateLimited ? 429 : 200).json(result);
+  } catch (err) {
+    console.error('[start]', err.message);
+    return res.status(502).json({ error: 'Could not create link' });
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
