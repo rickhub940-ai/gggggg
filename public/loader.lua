@@ -340,52 +340,44 @@ end
 local HttpRequest = RealHttpRequest
 
 -- ===========================================================
--- Anti-Save — Signal-based (แบบไฟล์ X 100%)
+-- Anti-Save
+--
+-- Use the signal bus created above instead of env.Signal.  `Signal` is not a
+-- standard executor API, so accessing env.Signal.new() stopped the loader
+-- before it could fetch the payload.  The monitor is installed only after the
+-- payload has completed its start-up checks; otherwise its own hook checks see
+-- this hook and reject a valid launch.
 -- ===========================================================
-local env = getgenv()
-
-local saved = env.Signal.new()
-local target = env.writefile
-local oldWrite
-
-oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
-    local result = table.pack(pcall(oldWrite, path, contents, ...))
-    local success = result[1] and result[2] ~= false
-
-    if success then
-        saved:Fire({
-            api = "writefile",
-            path = tostring(path),
-            bytes = typeof(contents) == "string" and #contents or nil,
-        })
+local function installWriteFileMonitor()
+    if type(RealWriteFile) ~= "function"
+        or type(RealHookFunction) ~= "function"
+        or type(RealNewCClosure) ~= "function" then
+        return false
     end
 
-    if not result[1] then
-        error(result[2], 0)
-    end
-    return table.unpack(result, 2, result.n)
-end))
+    local originalWrite
+    local ok = pcall(function()
+        originalWrite = RealHookFunction(RealWriteFile, RealNewCClosure(function(path, contents, ...)
+            local result = table.pack(pcall(originalWrite, path, contents, ...))
 
-saved:Connect(function(event)
-    print("[Luasec] writefile detected:", event.path, event.bytes, "bytes")
-
-    -- ลบไฟล์
-    if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
-        pcall(function()
-            if RealIsFile(event.path) then
-                RealDelfile(event.path)
+            if result[1] and result[2] ~= false then
+                LuasecSignal.OnDetect:Fire({
+                    type = "payload_save",
+                    api = "writefile",
+                    path = tostring(path),
+                    size = typeof(contents) == "string" and #contents or nil,
+                })
             end
-        end)
-    end
 
-    -- Kick
-    pcall(function()
-        Players.LocalPlayer:Kick("[Luasec] File save blocked. Access denied.")
+            if not result[1] then
+                error(result[2], 0)
+            end
+            return table.unpack(result, 2, result.n)
+        end))
     end)
 
-    task.wait(0.3)
-    if NfCrash then NfCrash() else while true do end end
-end)
+    return ok and type(originalWrite) == "function"
+end
 
 -- ═══ สร้าง Loader Proof ═══
 do
@@ -454,3 +446,7 @@ local fn = SafeLoadstring(payloadSrc)
 if not fn then return Players.LocalPlayer:Kick("[Luasec] Load failed") end
 local runOk = pcall(fn)
 if not runOk then return Players.LocalPlayer:Kick("[Luasec] Runtime error") end
+
+-- This must happen after the payload's initial integrity checks.  Installing
+-- the hook earlier makes its writefile preflight report our own hook as tampering.
+installWriteFileMonitor()

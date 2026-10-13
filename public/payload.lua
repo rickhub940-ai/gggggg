@@ -39,8 +39,6 @@ local RealHookFunction = hookfunction
 local RealRawset = rawset
 local RealRawget = rawget
 local RealLoadstring = loadstring
-local RealDelfile = delfile
-local RealIsFile = isfile
 
 -- ═══ L4-L6: hook check ═══
 if type(RealWriteFile) == "function" then
@@ -85,50 +83,13 @@ end
 print("[Luasec] Payload L1-L6 passed")
 
 -- ===========================================================
--- Anti-Save — Signal-based (แบบไฟล์ X 100%)
+-- Anti-Save
+--
+-- The loader owns the writefile monitor and sends detections through
+-- LuasecSignal.OnDetect.  Do not install a second hook here: it would require
+-- a non-standard env.Signal API and make the loader's hook look like tampering
+-- during this payload's L4 preflight.
 -- ===========================================================
-local env = getgenv()
-
-local saved = env.Signal.new()
-local target = env.writefile
-local oldWrite
-
-oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
-    local result = table.pack(pcall(oldWrite, path, contents, ...))
-    local success = result[1] and result[2] ~= false
-
-    if success then
-        saved:Fire({
-            api = "writefile",
-            path = tostring(path),
-            bytes = typeof(contents) == "string" and #contents or nil,
-        })
-    end
-
-    if not result[1] then
-        error(result[2], 0)
-    end
-    return table.unpack(result, 2, result.n)
-end))
-
-saved:Connect(function(event)
-    print("[Luasec] writefile detected:", event.path, event.bytes, "bytes")
-
-    if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
-        pcall(function()
-            if RealIsFile(event.path) then
-                RealDelfile(event.path)
-            end
-        end)
-    end
-
-    pcall(function()
-        Players.LocalPlayer:Kick("[Luasec] File save blocked. Access denied.")
-    end)
-
-    task.wait(0.3)
-    if NfCrash then NfCrash() else while true do end end
-end)
 
 -- ═══ Locals ═══
 local SCRIPT_NAME = getgenv().script or _G.script
