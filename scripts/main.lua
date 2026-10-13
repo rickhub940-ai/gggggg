@@ -41,7 +41,7 @@ local function getRequest()
     return (syn and syn.request) or (http and http.request) or request or http_request
 end
 
-local BASE_URL = "https://YOUR-VERCEL-DOMAIN.vercel.app"
+local BASE_URL = "https://keysytemdemo.vercel.app/"
 local req = getRequest()
 if not req then return Players.LocalPlayer:Kick("[Luasec] HTTP not supported") end
 
