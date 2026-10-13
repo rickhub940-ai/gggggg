@@ -39,6 +39,8 @@ local function getHWID()
 end
 
 local function getRequest()
+    local captured = getgenv().LuasecRequest
+    if type(captured) == "function" then return captured end
     return (syn and syn.request) or (http and http.request) or request or http_request
 end
 

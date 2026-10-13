@@ -213,6 +213,19 @@ async function handleScript(req, res, ip) {
     if (decoded.ok) clientData = decoded.data;
   }
 
+  const rngValues = clientData && ['Rng1', 'Rng2', 'Rng3', 'Rng4', 'Rng5']
+    .map((field) => clientData[field]);
+  const rngFloat = clientData?.RngFloat;
+  // A non-integer challenge component catches simple RNG hooks that force a
+  // fixed integer. It is a signal only; server-issued tickets remain the
+  // authorization boundary.
+  if (!rngValues || !rngValues.every(Number.isSafeInteger) ||
+      !Number.isFinite(rngFloat) || Number.isInteger(rngFloat)) {
+    return res.status(200).json(encodePayload({
+      Valid: false, reason: 'RNG challenge rejected',
+    }, xorKey));
+  }
+
   const scriptToken = crypto.randomBytes(24).toString('hex');
   const runtimeSecret = crypto.randomBytes(32).toString('hex');
 
@@ -248,11 +261,7 @@ async function handleScript(req, res, ip) {
   // original RNG value. The previous code applied the inverse on both sides,
   // turning every value into roughly 4x itself and rejecting valid keys.
   let check = '0|0|0|0|0';
-  const rngValues = clientData && ['Rng1', 'Rng2', 'Rng3', 'Rng4', 'Rng5']
-    .map((name) => clientData[name]);
-  if (rngValues && rngValues.every(Number.isSafeInteger)) {
-    check = rngValues.map((value) => (value - 0.5) / 2).join('|');
-  }
+  check = rngValues.map((value) => (value - 0.5) / 2).join('|');
 
   return res.status(200).json(encodePayload({
     Valid: true,

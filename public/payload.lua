@@ -141,6 +141,8 @@ local function StopChecks()
     env.LuasecScript = nil
     env.LuasecLoadTime = nil
     env.LuasecSignal = nil
+    env.LuasecRequest = nil
+    env.LuasecRequestAudit = nil
     env.Key = nil
     _G.Key = nil
     env.Luasec = nil
@@ -269,14 +271,18 @@ if type(hookfunction) == "function" and isfunctionhooked(hookfunction) then
     return TamperKick("T16")
 end
 
--- HTTP picker
+-- Use the request function captured and audited by the loader instead of
+-- resolving a fresh global alias that may have been replaced afterwards.
 do
-    local List = {}
-    for _, V in pairs({ http.request, request, http_request }) do
-        if V ~= nil and type(V) == "function" then List[#List + 1] = V end
+    local capturedRequest = SafeGetGenv().LuasecRequest
+    if type(capturedRequest) ~= "function" then
+        return TamperKick("HTTP: missing captured request")
     end
-    if #List == 0 then return KickPlayer("Executor does not support HTTP", 0) end
-    HttpRequest = List[math.random(1, #List)]
+    local ok, hooked = pcall(isfunctionhooked, capturedRequest)
+    if not ok or hooked then
+        return TamperKick("HTTP: request hooked")
+    end
+    HttpRequest = capturedRequest
 end
 
 print("[Luasec] Payload tamper checks passed")
@@ -484,6 +490,8 @@ local function FetchAndLoad(key, sname)
     local rng = {
         Rng1 = Floor(R1()), Rng2 = Floor(R2()), Rng3 = Floor(R3()),
         Rng4 = Floor(R4()), Rng5 = Floor(R5()),
+        -- Kept as a non-integer for the server-side challenge sanity check.
+        RngFloat = math.random(1, 1000000) + math.random(),
     }
     local body = EncodeBody(rng)
     body.ticket = Ticket

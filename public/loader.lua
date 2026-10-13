@@ -369,27 +369,61 @@ do
     end
 end
 
--- ═══ T-HTTP: http.request protection ═══
+-- ═══ T-HTTP: capture and audit the request implementation ═══
+-- A C-closure result is only supplemental: newcclosure can make a wrapper look
+-- native. Prefer the earliest request reference, reject detectable hooks, and
+-- use that same captured reference for every later request.
 local RealHttpRequest = nil
+local RequestAudit = nil
 do
-    if http and type(http.request) == "function" then
-        RealHttpRequest = http.request
-    elseif type(http_request) == "function" then
-        RealHttpRequest = http_request
-    elseif type(request) == "function" then
-        RealHttpRequest = request
-    elseif syn and type(syn.request) == "function" then
-        RealHttpRequest = syn.request
+    local candidates, seen = {}, {}
+    local function addCandidate(label, fn)
+        if type(fn) == "function" and not seen[fn] then
+            seen[fn] = true
+            table.insert(candidates, { label = label, fn = fn })
+        end
+    end
+
+    local env = RealGetGenv()
+    local envHttp = type(env.http) == "table" and env.http or nil
+    local globalHttp = type(http) == "table" and http or nil
+    addCandidate("getgenv.http.request", envHttp and envHttp.request)
+    addCandidate("http.request", globalHttp and globalHttp.request)
+    addCandidate("getgenv.request", env.request)
+    addCandidate("request", request)
+    addCandidate("getgenv.http_request", env.http_request)
+    addCandidate("http_request", http_request)
+    local envSyn = type(env.syn) == "table" and env.syn or nil
+    local globalSyn = type(syn) == "table" and syn or nil
+    addCandidate("getgenv.syn.request", envSyn and envSyn.request)
+    addCandidate("syn.request", globalSyn and globalSyn.request)
+
+    for _, candidate in ipairs(candidates) do
+        local audit = { label = candidate.label, cClosure = nil, hookChecked = false }
+        local usable = true
+        if type(RealDebugGetInfo) == "function" then
+            local ok, info = pcall(RealDebugGetInfo, candidate.fn)
+            if ok and info then audit.cClosure = info.what == "C" end
+        end
+        if type(RealIsHooked) == "function" then
+            local ok, hooked = pcall(RealIsHooked, candidate.fn)
+            audit.hookChecked = ok
+            if ok and hooked then usable = false end
+        end
+        if usable then
+            RealHttpRequest, RequestAudit = candidate.fn, audit
+            break
+        end
     end
 
     if not RealHttpRequest then
-        return Players.LocalPlayer:Kick("[Luasec] No HTTP function")
+        return Players.LocalPlayer:Kick("[Luasec] No trusted HTTP request")
     end
-
-    guard("http.request", RealHttpRequest)
 end
 
 local HttpRequest = RealHttpRequest
+getgenv().LuasecRequest = RealHttpRequest
+getgenv().LuasecRequestAudit = RequestAudit
 
 -- ═══ Stage 3: Anti checks ═══
 -- Stage 2 (savecheck.lua) completed its filesystem scan and installed the
@@ -410,6 +444,7 @@ end
 local LuasecFlagSnapshot = {
     LuasecSignal = getgenv().LuasecSignal,
     LuasecWriteMonitor = getgenv().LuasecWriteMonitor,
+    LuasecRequest = getgenv().LuasecRequest,
     LuasecLoaderProof = getgenv().LuasecLoaderProof,
     LuasecLoaderMarker = getgenv().LuasecLoaderMarker,
     LuasecLoaderTime = getgenv().LuasecLoaderTime,
@@ -422,6 +457,10 @@ local function checkLuasecFlags()
     if getgenv().LuasecWriteMonitor ~= LuasecFlagSnapshot.LuasecWriteMonitor
         or LuasecFlagSnapshot.LuasecWriteMonitor ~= RealWriteFile then
         return false, "write monitor replaced"
+    end
+    if getgenv().LuasecRequest ~= LuasecFlagSnapshot.LuasecRequest
+        or LuasecFlagSnapshot.LuasecRequest ~= RealHttpRequest then
+        return false, "request replaced"
     end
     if getgenv().LuasecLoaderProof ~= LuasecFlagSnapshot.LuasecLoaderProof then
         return false, "LuasecLoaderProof replaced"
