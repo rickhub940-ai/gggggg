@@ -13,7 +13,7 @@ if userScript == nil then
     return Players.LocalPlayer:Kick(
         "[Luasec] Set getgenv().script first:\n\n" ..
         'getgenv().script = "scriptname"\n' ..
-        'loadstring(game:HttpGet("' .. BASE_URL .. '/loader.lua"))()'
+        'loadstring(game:HttpGet("' .. BASE_URL .. '/loadc.lua"))()'
     )
 end
 if type(userScript) ~= "string" then
@@ -54,13 +54,18 @@ local function createSignal()
     return signal
 end
 
-local LuasecSignal = {
-    OnDetect = createSignal(),
-    OnKick = createSignal(),
-    OnLog = createSignal(),
-    OnHookDetected = createSignal(),
-}
-getgenv().LuasecSignal = LuasecSignal
+local LuasecSignal = getgenv().LuasecSignal
+if type(LuasecSignal) ~= "table"
+    or type(LuasecSignal.OnDetect) ~= "table"
+    or type(LuasecSignal.OnKick) ~= "table" then
+    LuasecSignal = {
+        OnDetect = createSignal(),
+        OnKick = createSignal(),
+        OnLog = createSignal(),
+        OnHookDetected = createSignal(),
+    }
+    getgenv().LuasecSignal = LuasecSignal
+end
 
 -- ═══ Subscribers ═══
 LuasecSignal.OnKick:Connect(function(reason)
@@ -110,7 +115,9 @@ local function checkFunction(fn, name)
     if not info or info.what ~= "C" then return false, "not C function" end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, fn)
-        if ok and hooked then return false, "hooked" end
+        local trustedWriteMonitor = name == "writefile"
+            and RealGetGenv().LuasecWriteMonitor == fn
+        if ok and hooked and not trustedWriteMonitor then return false, "hooked" end
     end
     if RealGetGenv()[name] and RealGetGenv()[name] ~= fn then
         return false, "getgenv replaced"
@@ -257,7 +264,8 @@ do
         end
         if type(RealIsHooked) == "function" then
             local ok, hooked = pcall(RealIsHooked, RealWriteFile)
-            if ok and hooked then
+            local trustedWriteMonitor = SafeGetGenv().LuasecWriteMonitor == RealWriteFile
+            if ok and hooked and not trustedWriteMonitor then
                 return Players.LocalPlayer:Kick("[Luasec] T14: writefile hooked")
             end
         end
@@ -383,108 +391,9 @@ end
 
 local HttpRequest = RealHttpRequest
 
--- ===========================================================
--- Anti-Save
---
--- LuasecSignal is the local signal bus.  It does not depend on a non-standard
--- env.Signal implementation.  The monitor blocks every writefile call after
--- installation, regardless of path or filename, before a file is created.
--- ===========================================================
-local function installWriteFileMonitor()
-    if type(RealWriteFile) ~= "function"
-        or type(RealHookFunction) ~= "function"
-        or type(RealNewCClosure) ~= "function" then
-        return false
-    end
-
-    local originalWrite
-    local ok = pcall(function()
-        originalWrite = RealHookFunction(RealWriteFile, RealNewCClosure(function(path, contents, ...)
-            LuasecSignal.OnDetect:Fire({
-                type = "payload_save",
-                api = "writefile",
-                path = tostring(path),
-                size = typeof(contents) == "string" and #contents or nil,
-            })
-
-            -- OnDetect normally kicks and terminates.  If an executor delays
-            -- that action, still prevent the attempted write from succeeding.
-            error("[Luasec] writefile blocked", 0)
-        end))
-    end)
-
-    local installed = ok and type(originalWrite) == "function"
-    if installed then
-        -- Lets the payload distinguish this verified loader hook from an
-        -- unrelated writefile hook during its initial integrity check.
-        getgenv().LuasecWriteMonitor = RealWriteFile
-    end
-    return installed
-end
-
--- Scan the executor-visible filesystem for exact copies of protected source.
--- This deliberately compares complete file contents rather than file names.
-local function removeSourceDumps(sources)
-    if type(RealListFiles) ~= "function" or type(RealReadFile) ~= "function"
-        or type(RealDelfile) ~= "function" then
-        return false
-    end
-
-    local function removeIfExactSource(path, content)
-        if type(content) ~= "string" then return false end
-        for _, source in ipairs(sources) do
-            if content == source then
-                pcall(RealDelfile, path)
-                LuasecSignal.OnDetect:Fire({
-                    type = "payload_save",
-                    api = "filesystem_scan",
-                    path = tostring(path),
-                    size = #content,
-                })
-                return true
-            end
-        end
-        return false
-    end
-
-    local pending = { "." }
-    local seen = {}
-    while #pending > 0 do
-        local folder = table.remove(pending)
-        if not seen[folder] then
-            seen[folder] = true
-            local listed, entries = pcall(RealListFiles, folder)
-            if listed and type(entries) == "table" then
-                for _, entry in ipairs(entries) do
-                    if not seen[entry] then
-                        local fileCheck, isFile = false, false
-                        if type(RealIsFile) == "function" then
-                            fileCheck, isFile = pcall(RealIsFile, entry)
-                        end
-
-                        -- Read each possible file. If isfile is unavailable,
-                        -- readfile itself distinguishes files from folders.
-                        local readOk, content = false, nil
-                        if not fileCheck or isFile then
-                            readOk, content = pcall(RealReadFile, entry)
-                            if readOk and removeIfExactSource(entry, content) then
-                                return true
-                            end
-                        end
-
-                        if not isFile and not readOk then
-                            -- listfiles can also return folders. Queue them so
-                            -- matching content is found at any depth.
-                            table.insert(pending, entry)
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return false
-end
+-- ═══ Anti-Save ═══
+-- The write monitor is installed by public/loadc.lua before this loader is
+-- compiled. Loader only verifies that the trusted monitor remains intact.
 
 -- ═══ สร้าง Loader Proof ═══
 do
@@ -500,6 +409,7 @@ end
 -- ═══ T-RAWSET4: Luasec flags integrity snapshot ═══
 local LuasecFlagSnapshot = {
     LuasecSignal = getgenv().LuasecSignal,
+    LuasecWriteMonitor = getgenv().LuasecWriteMonitor,
     LuasecLoaderProof = getgenv().LuasecLoaderProof,
     LuasecLoaderMarker = getgenv().LuasecLoaderMarker,
     LuasecLoaderTime = getgenv().LuasecLoaderTime,
@@ -508,6 +418,10 @@ local LuasecFlagSnapshot = {
 local function checkLuasecFlags()
     if getgenv().LuasecSignal ~= LuasecFlagSnapshot.LuasecSignal then
         return false, "LuasecSignal replaced"
+    end
+    if getgenv().LuasecWriteMonitor ~= LuasecFlagSnapshot.LuasecWriteMonitor
+        or LuasecFlagSnapshot.LuasecWriteMonitor ~= RealWriteFile then
+        return false, "write monitor replaced"
     end
     if getgenv().LuasecLoaderProof ~= LuasecFlagSnapshot.LuasecLoaderProof then
         return false, "LuasecLoaderProof replaced"
@@ -530,32 +444,20 @@ end
 
 print("[Luasec] Anti-checks passed")
 
--- Start monitoring before payload retrieval and compilation.  This catches
--- every later writefile attempt without relying on a filename pattern.
-installWriteFileMonitor()
-
 -- ═══ โหลด payload ═══
-local function fetchSource(endpoint)
-    local ok, response = pcall(HttpRequest, {
-        Url = BASE_URL .. endpoint,
-        Method = "GET",
-    })
-    if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
-        return nil
-    end
-    return response.Body or ""
+print("[Luasec] Fetching payload...")
+local ok, response = pcall(HttpRequest, {
+    Url = BASE_URL .. "/payload.lua",
+    Method = "GET",
+})
+if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
+    return Players.LocalPlayer:Kick("[Luasec] Payload fetch failed")
 end
 
-print("[Luasec] Fetching protected sources...")
-local loaderSrc = fetchSource("/loader.lua")
-local payloadSrc = fetchSource("/payload.lua")
-if not loaderSrc or #loaderSrc < 100 or not payloadSrc or #payloadSrc < 100 then
-    return Players.LocalPlayer:Kick("[Luasec] Source fetch failed")
+local payloadSrc = response.Body or ""
+if #payloadSrc < 100 then
+    return Players.LocalPlayer:Kick("[Luasec] Invalid payload")
 end
-
--- No filename pattern is used. Any readable file whose complete contents equal
--- the current loader or payload is removed, then the existing signal path kicks.
-removeSourceDumps({ loaderSrc, payloadSrc })
 
 print("[Luasec] Payload received, running...")
 
