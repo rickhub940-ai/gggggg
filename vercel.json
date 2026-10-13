@@ -2,24 +2,19 @@
   "functions": {
     "api/*.js": {
       "maxDuration": 10,
-      "includeFiles": "scripts/**"
+      "includeFiles": ["scripts/**", "public/**"]
     }
   },
+  "redirects": [
+    { "source": "/", "destination": "https://yura.lol/09ms", "permanent": false }
+  ],
   "rewrites": [
+    { "source": "/payload.lua",        "destination": "/api/auth?action=payload"        },
+    { "source": "/api/ping",           "destination": "/api/auth?action=ping"           },
     { "source": "/api/verify",         "destination": "/api/auth?action=verify"         },
     { "source": "/api/script",         "destination": "/api/auth?action=script"         },
     { "source": "/api/script-verify",  "destination": "/api/auth?action=script-verify"  },
     { "source": "/api/heartbeat",      "destination": "/api/auth?action=heartbeat"      },
-    { "source": "/api/admin/ban",      "destination": "/api/auth?action=admin-ban"      },
-    { "source": "/api/list",           "destination": "/api/auth?action=list"           }
-  ],
-  "headers": [
-    {
-      "source": "/loader.lua",
-      "headers": [
-        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
-        { "key": "Cache-Control", "value": "public, max-age=60" }
-      ]
-    }
+    { "source": "/api/start",          "destination": "/api/auth?action=start"          }
   ]
 }
