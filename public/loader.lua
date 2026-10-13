@@ -488,19 +488,7 @@ end
 print("[Luasec] Anti-checks passed")
 
 -- ═══ T-HTTP2: ping test ═══
-do
-    local pingOk, pingRes = pcall(HttpRequest, {
-        Url = BASE_URL .. "/api/ping",
-        Method = "GET",
-    })
-    if not pingOk or type(pingRes) ~= "table" then
-        return Players.LocalPlayer:Kick("[Luasec] T-HTTP2: ping failed")
-    end
-    local body = pingRes.Body or ""
-    if not body:find("luasec_pong_v1", 1, true) then
-        return Players.LocalPlayer:Kick("[Luasec] T-HTTP2: URL tampered")
-    end
-end
+
 
 -- ═══ โหลด payload ═══
 print("[Luasec] Fetching payload...")
