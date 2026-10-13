@@ -222,12 +222,16 @@ end
 
 local function CheckFn(name, fn)
     if type(fn) ~= "function" then TamperKick("T4:" .. name); return false end
-    local ok, hooked = pcall(isfunctionhooked, fn)
-    if not ok or hooked then TamperKick("T4:" .. name); return false end
+    -- Compatible mode: only perform the hook audit when this executor exposes
+    -- it. A C-closure appearance alone is not treated as proof of authenticity.
+    if type(RealIsHooked) == "function" then
+        local ok, hooked = pcall(RealIsHooked, fn)
+        if not ok or hooked then TamperKick("T4:" .. name); return false end
+    end
     return true
 end
 
-if not CheckFn("isfunctionhooked", isfunctionhooked) then return end
+if type(RealIsHooked) == "function" and not CheckFn("isfunctionhooked", RealIsHooked) then return end
 if not CheckFn("debug.getinfo", debug.getinfo) then return end
 if not CheckFn("loadstring", loadstring) then return end
 if not CheckFn("pcall", pcall) then return end
@@ -259,7 +263,10 @@ do
     if type(SafeLoadstring) ~= "function" then return TamperKick("T13") end
     local info = debug.getinfo(SafeLoadstring)
     if not info or info.what ~= "C" then return TamperKick("T13") end
-    if isfunctionhooked(SafeLoadstring) then return TamperKick("T13") end
+    if type(RealIsHooked) == "function" then
+        local ok, hooked = pcall(RealIsHooked, SafeLoadstring)
+        if not ok or hooked then return TamperKick("T13") end
+    end
     if SafeGetGenv().loadstring ~= SafeLoadstring then return TamperKick("T13") end
     local ok, fn = pcall(SafeLoadstring, "return 1 + 1")
     if not ok or type(fn) ~= "function" then return TamperKick("T13") end
@@ -267,8 +274,9 @@ do
     if not ok2 or result ~= 2 then return TamperKick("T13") end
 end
 
-if type(hookfunction) == "function" and isfunctionhooked(hookfunction) then
-    return TamperKick("T16")
+if type(hookfunction) == "function" and type(RealIsHooked) == "function" then
+    local ok, hooked = pcall(RealIsHooked, hookfunction)
+    if not ok or hooked then return TamperKick("T16") end
 end
 
 -- Use the request function captured and audited by the loader instead of
@@ -278,9 +286,11 @@ do
     if type(capturedRequest) ~= "function" then
         return TamperKick("HTTP: missing captured request")
     end
-    local ok, hooked = pcall(isfunctionhooked, capturedRequest)
-    if not ok or hooked then
-        return TamperKick("HTTP: request hooked")
+    if type(RealIsHooked) == "function" then
+        local ok, hooked = pcall(RealIsHooked, capturedRequest)
+        if not ok or hooked then
+            return TamperKick("HTTP: request hooked")
+        end
     end
     HttpRequest = capturedRequest
 end
