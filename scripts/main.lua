@@ -12,6 +12,7 @@ local RuntimeSecret = getgenv().LuasecSecret
 local Ticket = getgenv().LuasecTicket
 local ScriptToken = getgenv().LuasecToken
 local LuasecScript = getgenv().LuasecScript
+local ExpectedScript = "${SCRIPTID}"
 
 if type(RuntimeSecret) ~= "string" or #RuntimeSecret ~= 64 then
     return Players.LocalPlayer:Kick("[Luasec] Missing runtime secret")
@@ -19,7 +20,7 @@ end
 if not Ticket or not ScriptToken then
     return Players.LocalPlayer:Kick("[Luasec] Invalid session")
 end
-if LuasecScript ~= "bloxfruits" then
+if LuasecScript ~= ExpectedScript then
     return Players.LocalPlayer:Kick("[Luasec] Script mismatch")
 end
 
@@ -54,7 +55,7 @@ local ok, res = pcall(req, {
         hwid = getHWID(),
         scriptToken = ScriptToken,
         runtimeSecret = RuntimeSecret,
-        scriptName = "main",
+        scriptName = ExpectedScript,
     }),
 })
 
