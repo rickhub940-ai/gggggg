@@ -62,6 +62,58 @@ if removeMarkedFiles() then
     return Players.LocalPlayer:Kick("[Luasec] Source save detected")
 end
 
+-- Use the same Signal.new + hookfunction write detector as X.lua for files
+-- created after this stage has started.
+local env = getgenv()
+if type(env.Signal) ~= "table" or type(env.Signal.new) ~= "function" then
+    return Players.LocalPlayer:Kick("[Luasec] Signal.new unavailable")
+end
+if type(env.writefile) ~= "function" or type(hookfunction) ~= "function"
+    or type(newcclosure) ~= "function" then
+    return Players.LocalPlayer:Kick("[Luasec] Write monitor unavailable")
+end
+
+local saved = env.Signal.new()
+local target = env.writefile
+local oldWrite
+
+oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
+    local result = table.pack(pcall(oldWrite, path, contents, ...))
+    local success = result[1] and result[2] ~= false
+
+    if success then
+        saved:Fire({
+            api = "writefile",
+            path = tostring(path),
+            bytes = typeof(contents) == "string" and #contents or nil,
+        })
+    end
+
+    if not result[1] then
+        error(result[2], 0)
+    end
+    return table.unpack(result, 2, result.n)
+end))
+
+saved:Connect(function(event)
+    if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
+        pcall(function()
+            if RealIsFile(event.path) then
+                RealDelfile(event.path)
+            end
+        end)
+    end
+
+    pcall(function()
+        Players.LocalPlayer:Kick("[Luasec] Source save detected: " .. tostring(event.path))
+    end)
+    task.wait(0.3)
+    if NfCrash then NfCrash() else while true do end end
+end)
+
+-- Stage 3 recognizes this stage-owned writefile hook as trusted.
+getgenv().LuasecWriteMonitor = target
+
 local requestFn = (syn and syn.request) or (http and http.request) or request or http_request
 if type(requestFn) ~= "function" then
     return Players.LocalPlayer:Kick("[Luasec] HTTP not supported")
