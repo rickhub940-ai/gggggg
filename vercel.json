@@ -1,0 +1,25 @@
+{
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 10,
+      "includeFiles": "scripts/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/verify",         "destination": "/api/auth?action=verify"         },
+    { "source": "/api/script",         "destination": "/api/auth?action=script"         },
+    { "source": "/api/script-verify",  "destination": "/api/auth?action=script-verify"  },
+    { "source": "/api/heartbeat",      "destination": "/api/auth?action=heartbeat"      },
+    { "source": "/api/admin/ban",      "destination": "/api/auth?action=admin-ban"      },
+    { "source": "/api/list",           "destination": "/api/auth?action=list"           }
+  ],
+  "headers": [
+    {
+      "source": "/loader.lua",
+      "headers": [
+        { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+        { "key": "Cache-Control", "value": "public, max-age=60" }
+      ]
+    }
+  ]
+}
