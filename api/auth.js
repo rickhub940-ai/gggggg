@@ -1,6 +1,3 @@
-// ═══════════════════════════════════════════════════════════
-// Luasec Auth API — Platoboost + Ticket + Runtime Secret
-// ═══════════════════════════════════════════════════════════
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -16,7 +13,6 @@ const sessions = new Map();
 const SESSION_TTL = 30 * 60 * 1000;
 const RUNTIME_TTL = 60 * 1000;
 
-// ─── Rate limit ─────────────────────────────────────────────
 const rateLimit = new Map();
 const RATE_WINDOW = 60 * 1000;
 const RATE_MAX = 15;
@@ -41,20 +37,71 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000).unref?.();
 
-// ─── Main ───────────────────────────────────────────────────
+const TRAP_URL = 'https://yura.lol/09ms';
+
+function trapRedirect(res) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Location', TRAP_URL);
+  return res.status(302).send('');
+}
+
+function isBrowserRequest(req) {
+  const headers = req.headers || {};
+  const ua = (headers['user-agent'] || '').toLowerCase();
+
+  if (/mozilla|chrome|safari|firefox|edge|opera|msie|trident/i.test(ua)) return true;
+  if (/discordbot|telegrambot|twitterbot|facebookexternalhit|slackbot/i.test(ua)) return true;
+
+  if (headers['origin'] || headers['referer']) return true;
+  if (headers['accept-language']) return true;
+  for (const k of Object.keys(headers)) {
+    if (k.startsWith('sec-')) return true;
+  }
+
+  return false;
+}
+
 module.exports = async function handler(req, res) {
+  const url = new URL(req.url, 'http://x');
+  const action = req.query?.action || url.searchParams.get('action');
+
+  if (action === 'ping') {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).send('luasec_pong_v1');
+  }
+
+  if (action === 'payload') {
+    if (isBrowserRequest(req)) return trapRedirect(res);
+    try {
+      const p = path.join(process.cwd(), 'public', 'payload.lua');
+      const body = fs.readFileSync(p, 'utf8');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=60');
+      return res.status(200).send(body);
+    } catch (e) {
+      console.error('[payload]', e.message);
+      return res.status(404).send('Not Found');
+    }
+  }
+
+  if (req.method !== 'POST') return trapRedirect(res);
+  if (isBrowserRequest(req)) return trapRedirect(res);
+
+  const ct = req.headers['content-type'] || '';
+  if (!ct.includes('application/json')) return trapRedirect(res);
+
+  const validActions = ['verify', 'script', 'script-verify', 'heartbeat', 'start', 'admin-ban'];
+  if (!action || !validActions.includes(action)) return trapRedirect(res);
+
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const url = new URL(req.url, 'http://x');
-  const action = req.query?.action || url.searchParams.get('action');
   const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
              req.socket?.remoteAddress || '';
+
+  if (!checkRateLimit(ip)) {
+    return res.status(429).json({ error: 'Rate limited' });
+  }
 
   try {
     switch (action) {
@@ -62,11 +109,10 @@ module.exports = async function handler(req, res) {
       case 'script':         return await handleScript(req, res, ip);
       case 'script-verify':  return await handleScriptVerify(req, res);
       case 'heartbeat':      return await handleHeartbeat(req, res, ip);
-      case 'start':          return await handleStart(req, res);
+      case 'start':          return await handleStart(req, res, ip);
       case 'admin-ban':      return await handleAdminBan(req, res);
-      case 'list':           return await handleList(req, res);
       default:
-        return res.status(404).json({ error: 'Unknown action' });
+        return trapRedirect(res);
     }
   } catch (err) {
     console.error('[auth]', action, err.message);
@@ -74,7 +120,6 @@ module.exports = async function handler(req, res) {
   }
 };
 
-// ─── Codec ──────────────────────────────────────────────────
 function decodePayload(body, xorKey) {
   try {
     const { Data } = body || {};
@@ -96,33 +141,23 @@ function encodePayload(data, xorKey) {
   return { Data: bytes };
 }
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/verify — ตรวจ key กับ Platoboost → ออก ticket
-// ═══════════════════════════════════════════════════════════
 async function handleVerify(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
   const { key, hwid, userId, scriptName } = req.body || {};
 
   if (typeof key !== 'string' || key.length < 8 || key.length > 256)
     return res.status(400).json({ valid: false, error: 'invalid key format' });
-
   if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
     return res.status(400).json({ valid: false, error: 'invalid hwid format' });
-
   if (typeof scriptName !== 'string' || scriptName.length < 1 || scriptName.length > 64)
     return res.status(400).json({ valid: false, error: 'scriptName required' });
-
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(scriptName))
     return res.status(400).json({ valid: false, error: 'invalid scriptName format' });
-
-  if (!checkRateLimit(ip))
-    return res.status(429).json({ valid: false, message: 'Rate limited' });
 
   const reason = checkRevoked({ hwid, userId, ip });
   if (reason)
     return res.status(403).json({ valid: false, message: 'Banned: ' + reason });
 
-  // ═══ ตรวจ key กับ Platoboost ═══
   const result = await verifyKey(key, hwid);
   if (!result.valid) {
     return res.status(result.rateLimited ? 429 : 200).json({
@@ -141,9 +176,6 @@ async function handleVerify(req, res, ip) {
   return res.status(200).json({ valid: true, ticket, k: xorKey });
 }
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/script
-// ═══════════════════════════════════════════════════════════
 async function handleScript(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
   const { ticket, Data, scriptName } = req.body || {};
@@ -164,21 +196,12 @@ async function handleScript(req, res, ip) {
     ? scriptName
     : payload.scriptName;
 
-  if (!name)
-    return res.status(400).json({ Valid: false, reason: 'no scriptName' });
+  if (!name) return res.status(400).json({ Valid: false, reason: 'no scriptName' });
+  if (name !== payload.scriptName)
+    return res.status(403).json({ Valid: false, reason: 'scriptName mismatch' });
 
-  if (name !== payload.scriptName) {
-    return res.status(403).json({
-      Valid: false,
-      reason: 'scriptName mismatch with ticket',
-    });
-  }
-
-  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name)) {
-    return res.status(200).json(encodePayload(
-      { Valid: false, reason: 'Invalid script name' }, xorKey
-    ));
-  }
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name))
+    return res.status(200).json(encodePayload({ Valid: false, reason: 'Invalid script name' }, xorKey));
 
   let clientData = null;
   if (Data) {
@@ -207,9 +230,7 @@ async function handleScript(req, res, ip) {
     const p = path.join(process.cwd(), 'scripts', name + '.lua');
     scriptBody = fs.readFileSync(p, 'utf8');
   } catch {
-    return res.status(200).json(encodePayload(
-      { Valid: false, reason: 'Script not found: ' + name }, xorKey
-    ));
+    return res.status(200).json(encodePayload({ Valid: false, reason: 'Script not found: ' + name }, xorKey));
   }
 
   scriptBody = scriptBody
@@ -240,9 +261,6 @@ async function handleScript(req, res, ip) {
   }, xorKey));
 }
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/script-verify — main.lua เรียก
-// ═══════════════════════════════════════════════════════════
 async function handleScriptVerify(req, res) {
   const { ticket, hwid, scriptToken, runtimeSecret, scriptName } = req.body || {};
 
@@ -259,9 +277,8 @@ async function handleScriptVerify(req, res) {
   if (reason)
     return res.status(403).json({ valid: false, reason: 'Banned: ' + reason });
 
-  if (typeof scriptName === 'string' && scriptName !== session.scriptName) {
+  if (typeof scriptName === 'string' && scriptName !== session.scriptName)
     return res.status(403).json({ valid: false, reason: 'scriptName changed' });
-  }
 
   if (typeof runtimeSecret !== 'string' || runtimeSecret.length !== 64)
     return res.status(403).json({ valid: false, reason: 'no runtime secret' });
@@ -295,9 +312,6 @@ async function handleScriptVerify(req, res) {
   return res.status(200).json({ valid: true, serverId: payload.jti });
 }
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/heartbeat
-// ═══════════════════════════════════════════════════════════
 async function handleHeartbeat(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
   const { ticket, Data } = req.body || {};
@@ -326,7 +340,6 @@ async function handleHeartbeat(req, res, ip) {
       session.failCount += 1;
     } else {
       session.failCount = 0;
-
       const sentName = decoded.data?.scriptName;
       if (typeof sentName !== 'string' || sentName !== session.scriptName) {
         sessions.delete(payload.jti);
@@ -350,13 +363,18 @@ async function handleHeartbeat(req, res, ip) {
   }, xorKey));
 }
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/start — สร้างลิงก์ซื้อ key
-// ═══════════════════════════════════════════════════════════
-async function handleStart(req, res) {
+async function handleStart(req, res, ip) {
   const { hwid } = req.body || {};
+
   if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
     return res.status(400).json({ error: 'invalid hwid' });
+
+  if (!checkRateLimit(ip))
+    return res.status(429).json({ error: 'Rate limited' });
+
+  const reason = checkRevoked({ hwid, ip });
+  if (reason)
+    return res.status(403).json({ error: 'Banned: ' + reason });
 
   try {
     const result = await createLink(hwid);
@@ -367,27 +385,10 @@ async function handleStart(req, res) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-// POST /api/list
-// ═══════════════════════════════════════════════════════════
-async function handleList(req, res) {
-  try {
-    const dir = path.join(process.cwd(), 'scripts');
-    const files = fs.readdirSync(dir)
-      .filter(f => f.endsWith('.lua'))
-      .map(f => f.replace('.lua', ''));
-    return res.status(200).json({ scripts: files });
-  } catch {
-    return res.status(200).json({ scripts: [] });
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// POST /api/admin/ban
-// ═══════════════════════════════════════════════════════════
 async function handleAdminBan(req, res) {
   const token = req.headers['x-admin-token'];
   const expected = process.env.ADMIN_TOKEN;
+
   if (!expected || token !== expected)
     return res.status(401).json({ error: 'unauthorized' });
 
@@ -407,4 +408,4 @@ async function handleAdminBan(req, res) {
     value: value.slice(0, 20) + (value.length > 20 ? '...' : ''),
     stats: stats(),
   });
-    }
+}
