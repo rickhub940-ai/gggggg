@@ -1,5 +1,5 @@
--- Super_boom
--- Luasec stage 2: remove dumped copies of this checker, then terminate.
+-- 8c1f0d303ab2452c77ad96854ddba005f8c12ddedb71d493
+-- Stage 2: remove dumped copies of this checker, then terminate.
 local Players = game:GetService("Players")
 local BASE_URL = "https://keysytemdemo.vercel.app"
 
@@ -14,7 +14,7 @@ local function removeMarkedFiles()
         return false
     end
 
-    local marker = "-- Super_boom"
+    local marker = "-- 8c1f0d303ab2452c77ad96854ddba005f8c12ddedb71d493"
     local pending = { "." }
     local seen = {}
     local matches = {}
