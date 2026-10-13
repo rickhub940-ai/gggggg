@@ -106,10 +106,46 @@ local XORKey = ""
 local Ticket = ""
 local HttpRequest = nil
 local HeartbeatAlive = false
+local ChecksActive = true
 
 -- ═══ Helpers ═══
 local function SecureCrash()
     if NfCrash then NfCrash() else while true do end end
+end
+
+-- Stop all post-load monitoring and discard this loader's session state. The
+-- stage-2 write hook is disabled through LuasecChecksActive because executors
+-- do not provide a portable, safe unhook API.
+local function StopChecks()
+    if not ChecksActive then return end
+    ChecksActive = false
+    HeartbeatAlive = false
+    Ticket = ""
+    ServerId = ""
+    XORKey = ""
+
+    local env = getgenv()
+    local stopStageTwo = env.LuasecStopChecks
+    if type(stopStageTwo) == "function" then
+        pcall(stopStageTwo)
+    else
+        env.LuasecChecksActive = false
+        env.LuasecWriteMonitor = nil
+    end
+
+    env.LuasecLoader = nil
+    env.LuasecTicket = nil
+    env.LuasecToken = nil
+    env.LuasecSecret = nil
+    env.LuasecSession = nil
+    env.LuasecScript = nil
+    env.LuasecLoadTime = nil
+    env.LuasecSignal = nil
+    env.Key = nil
+    _G.Key = nil
+    env.Luasec = nil
+    _G.Luasec = nil
+    Luasec = nil
 end
 
 local function KickPlayer(Reason, Code)
@@ -387,6 +423,7 @@ end
 
 -- ═══ Load & Run ═══
 local function LoadScript(decrypted, key)
+    if not ChecksActive then return end
     local RuntimeSecret = decrypted.RuntimeSecret or ""
     if type(RuntimeSecret) ~= "string" or #RuntimeSecret ~= 64 then
         return KickPlayer("Invalid runtime secret", 0)
@@ -415,64 +452,13 @@ local function LoadScript(decrypted, key)
 
     print("[Luasec] Main script loaded")
 
-    HeartbeatAlive = true
-    task.spawn(function()
-        while Ticket do
-            task.wait(10)
-            if not HeartbeatAlive then break end
-
-            -- T13
-            if SafeGetGenv().loadstring ~= SafeLoadstring then
-                return KickPlayer("loadstring changed", 1)
-            end
-            if isfunctionhooked(SafeLoadstring) then
-                return KickPlayer("loadstring hooked", 1)
-            end
-
-            -- T-RAWSET3
-            local gok = true
-            if getgenv().loadstring and getgenv().loadstring ~= RealLoadstring then gok = false end
-            if getgenv().rawset and RealRawset and getgenv().rawset ~= RealRawset then gok = false end
-            if getgenv().rawget and RealRawget and getgenv().rawget ~= RealRawget then gok = false end
-            if not gok then
-                return KickPlayer("T-RAWSET3: genv changed", 1)
-            end
-
-            -- T19
-            local currentScript = SafeGetGenv().script or _G.script
-            if currentScript ~= SCRIPT_NAME_LOCKED then
-                return KickPlayer("script name changed", 1)
-            end
-
-            -- Heartbeat
-            local hb = EncodeBody({ ServerId = ServerId, scriptName = SCRIPT_NAME_LOCKED })
-            hb.ticket = Ticket
-            local hbRes = postJSON("/api/heartbeat", hb)
-            if hbRes and hbRes.status == 200 and hbRes.data and hbRes.data.Data then
-                local okDec2, dec2 = pcall(function()
-                    local raw = ""
-                    for _, b in ipairs(hbRes.data.Data) do raw = raw .. Char(b) end
-                    return HttpService:JSONDecode(Xor(Base64Decode(raw:sub(#XORKey + 1)), XORKey))
-                end)
-                if okDec2 and type(dec2) == "table" and dec2.kick then
-                    return KickPlayer(dec2.kick, 0)
-                end
-            end
-        end
-        HeartbeatAlive = false
-    end)
-
-    task.spawn(function()
-        while Ticket do
-            task.wait(30)
-            if not HeartbeatAlive then
-                return KickPlayer("Heartbeat stopped", 1)
-            end
-        end
-    end)
+    -- The requested lifecycle ends monitoring once the protected script has
+    -- launched successfully. This also clears the session and stage-2 state.
+    StopChecks()
 end
 
 local function FetchAndLoad(key, sname)
+    if not ChecksActive then return nil, "Cancelled" end
     local hwid = GetHWID()
     local userId = tostring(Players.LocalPlayer.UserId)
 
@@ -488,6 +474,7 @@ local function FetchAndLoad(key, sname)
     if r1.status ~= 200 or r1.data.valid ~= true then
         return nil, r1.data.message or r1.data.error or "Invalid key"
     end
+    if not ChecksActive then return nil, "Cancelled" end
 
     Ticket = r1.data.ticket
     XORKey = r1.data.k or ""
@@ -505,6 +492,7 @@ local function FetchAndLoad(key, sname)
     local r2, err2 = postJSON("/api/script", body)
     if not r2 then return nil, err2 or "Script fetch failed" end
     if r2.status ~= 200 then return nil, r2.body or "Script fetch failed" end
+    if not ChecksActive then return nil, "Cancelled" end
 
     local resp = r2.data
     if not resp or not resp.Data then return nil, "Invalid response" end
@@ -603,6 +591,7 @@ local function MakeUI()
     close.MouseButton1Click:Connect(function()
         gui:Destroy()
         _G.LUASEC_UI = nil
+        StopChecks()
     end)
 
     local sub = Instance.new("TextLabel")
@@ -719,10 +708,11 @@ local function MakeUI()
         setStatus("Verifying...", Color3.fromRGB(200, 200, 120))
         task.spawn(function()
             local decrypted, err = FetchAndLoad(key, SCRIPT_NAME_LOCKED)
+            if not ChecksActive then return end
             if not decrypted then setStatus(err or "Error"); setBusy(false); return end
             setStatus("Success!", Color3.fromRGB(100, 255, 100))
             task.wait(0.3)
-            LoadScript(decrypted, key)
+            if ChecksActive then LoadScript(decrypted, key) end
         end)
     end)
 
@@ -730,6 +720,7 @@ local function MakeUI()
         task.spawn(function()
             local hwid = GetHWID()
             local r, err = postJSON("/api/start", { hwid = hwid })
+            if not ChecksActive then return end
             if not r then setStatus(err or "Cannot open link"); return end
             if r.status ~= 200 or not r.data.url then
                 setStatus(r.data.error or "Cannot open link"); return

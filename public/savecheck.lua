@@ -76,12 +76,15 @@ end
 local saved = env.Signal.new()
 local target = env.writefile
 local oldWrite
+local saveConnection
+
+env.LuasecChecksActive = true
 
 oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
     local result = table.pack(pcall(oldWrite, path, contents, ...))
     local success = result[1] and result[2] ~= false
 
-    if success then
+    if success and env.LuasecChecksActive ~= false then
         saved:Fire({
             api = "writefile",
             path = tostring(path),
@@ -95,7 +98,9 @@ oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
     return table.unpack(result, 2, result.n)
 end))
 
-saved:Connect(function(event)
+saveConnection = saved:Connect(function(event)
+    if env.LuasecChecksActive == false then return end
+
     if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
         pcall(function()
             if RealIsFile(event.path) then
@@ -111,8 +116,20 @@ saved:Connect(function(event)
     if NfCrash then NfCrash() else while true do end end
 end)
 
+-- Called by the UI on close and after a successful main-script launch. The
+-- hook itself cannot be safely removed across executors, so it is made inert
+-- and its signal subscription is disconnected.
+env.LuasecStopChecks = function()
+    env.LuasecChecksActive = false
+    if saveConnection and type(saveConnection.Disconnect) == "function" then
+        pcall(function() saveConnection:Disconnect() end)
+    end
+    env.LuasecWriteMonitor = nil
+    env.LuasecStopChecks = nil
+end
+
 -- Stage 3 recognizes this stage-owned writefile hook as trusted.
-getgenv().LuasecWriteMonitor = target
+env.LuasecWriteMonitor = target
 
 local requestFn = (syn and syn.request) or (http and http.request) or request or http_request
 if type(requestFn) ~= "function" then
