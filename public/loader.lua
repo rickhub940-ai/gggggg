@@ -1,6 +1,6 @@
 -- ===========================================================
--- Luasec Bootstrap + Anti (Signal + T-RAWSET)
--- T0, T2-T6, T13-T16, T-RAWSET1-4, T-HTTP, T-HTTP2, T-LOG
+-- Luasec Bootstrap + Anti (Signal-based + T-RAWSET)
+-- Anti-Save ตามไฟล์ X 100%
 -- ===========================================================
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
@@ -339,108 +339,52 @@ end
 
 local HttpRequest = RealHttpRequest
 
--- ═══ Anti-Save: Signal-based (Size only) ═══
-local SIZE_THRESHOLD = 15000
+-- ===========================================================
+-- Anti-Save — Signal-based (แบบไฟล์ X 100%)
+-- ===========================================================
+local env = getgenv()
 
-local ALLOWLIST_PATTERNS = {
-    "clientsettings", "rbx", "config",
-    "user", "settings", "preferences",
-}
+local saved = env.Signal.new()
+local target = env.writefile
+local oldWrite
 
-local function isAllowlisted(path)
-    if type(path) ~= "string" then return false end
-    local lower = path:lower()
-    if #lower < 3 then return true end
-    for _, pat in ipairs(ALLOWLIST_PATTERNS) do
-        if lower:find(pat, 1, true) then return true end
+oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
+    local result = table.pack(pcall(oldWrite, path, contents, ...))
+    local success = result[1] and result[2] ~= false
+
+    if success then
+        saved:Fire({
+            api = "writefile",
+            path = tostring(path),
+            bytes = typeof(contents) == "string" and #contents or nil,
+        })
     end
-    if lower:match("%.log$") then return true end
-    if lower:match("%.cfg$") then return true end
-    if lower:match("%.ini$") then return true end
-    return false
-end
 
--- ═══ Signal-based writefile hook ═══
-if type(RealWriteFile) == "function"
-   and type(RealHookFunction) == "function"
-   and type(RealNewCClosure) == "function" then
+    if not result[1] then
+        error(result[2], 0)
+    end
+    return table.unpack(result, 2, result.n)
+end))
 
-    local saved = getgenv().Signal and getgenv().Signal.new and getgenv().Signal.new() or {
-        Connect = function() end,
-        Fire = function() end,
-    }
+saved:Connect(function(event)
+    print("[Luasec] writefile detected:", event.path, event.bytes, "bytes")
 
-    saved:Connect(function(event)
-        if isAllowlisted(event.path) then return end
-
-        local size = event.bytes or 0
-        if size >= SIZE_THRESHOLD then
-            if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
-                pcall(function()
-                    if RealIsFile(event.path) then RealDelfile(event.path) end
-                end)
+    -- ลบไฟล์
+    if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
+        pcall(function()
+            if RealIsFile(event.path) then
+                RealDelfile(event.path)
             end
+        end)
+    end
 
-            LuasecSignal.OnDetect:Fire({
-                type = "payload_save",
-                path = event.path,
-                size = size,
-            })
-        end
-    end)
-
+    -- Kick
     pcall(function()
-        RealHookFunction(RealWriteFile, RealNewCClosure(function(path, contents, ...)
-            local result = table.pack(pcall(RealWriteFile, path, contents, ...))
-            local success = result[1] and result[2] ~= false
-
-            if success then
-                saved:Fire({
-                    api = "writefile",
-                    path = tostring(path),
-                    bytes = typeof(contents) == "string" and #contents or nil,
-                })
-            end
-
-            if not result[1] then
-                error(result[2], 0)
-            end
-            return table.unpack(result, 2, result.n)
-        end))
+        Players.LocalPlayer:Kick("[Luasec] File save blocked. Access denied.")
     end)
-end
 
--- ═══ Scan existing files ═══
-local function scanAndKill()
-    if type(RealListFiles) ~= "function"
-       or type(RealReadFile) ~= "function"
-       or type(RealDelfile) ~= "function" then
-        return false
-    end
-
-    local ok, files = pcall(RealListFiles, ".")
-    if not ok or type(files) ~= "table" then return false end
-
-    for _, file in ipairs(files) do
-        if not file:match("^luasec_") and not isAllowlisted(file) then
-            local readOk, content = pcall(RealReadFile, file)
-            if readOk and type(content) == "string" and #content >= SIZE_THRESHOLD then
-                pcall(RealDelfile, file)
-                LuasecSignal.OnDetect:Fire({
-                    type = "payload_save",
-                    path = file,
-                    size = #content,
-                })
-                return true
-            end
-        end
-    end
-    return false
-end
-
-task.spawn(function()
     task.wait(0.3)
-    scanAndKill()
+    if NfCrash then NfCrash() else while true do end end
 end)
 
 -- ═══ สร้าง Loader Proof ═══
@@ -486,9 +430,6 @@ do
 end
 
 print("[Luasec] Anti-checks passed")
-
--- ═══ T-HTTP2: ping test ═══
-
 
 -- ═══ โหลด payload ═══
 print("[Luasec] Fetching payload...")
