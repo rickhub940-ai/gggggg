@@ -6,7 +6,7 @@ local HttpService = game:GetService("HttpService")
 local Players     = game:GetService("Players")
 local RunService  = game:GetService("RunService")
 
-local BASE_URL = "https://YOUR-VERCEL-DOMAIN.vercel.app"
+local BASE_URL = "https://keysytemdemo.vercel.app/api/list"
 
 -- ═══════════════════════════════════════════════════════════
 -- T0: ต้องตั้ง getgenv().script
