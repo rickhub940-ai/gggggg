@@ -6,7 +6,7 @@ local c = {
     true,
 }
 local u = "https://keysytemdemo.vercel.app/savecheck.lua"
-local d = "58960fed9542341fc1d7d1e0ef41a87fccb971c0a43bcf397bebc7ccc64acd84"
+local d = "ecac459bd145f9498488ae3e2f3488a4ae8168565e07065cf3efbbf4ffafa6dc"
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
