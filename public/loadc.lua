@@ -52,6 +52,14 @@ local function Kick(reason)
             task.wait(0.01)
         end
     end)
+    -- Best-effort executor signal trigger requested for compatible executors.
+    -- It is not a portable disconnect primitive, so LocalPlayer:Kick remains
+    -- the fail-closed fallback that actually enforces the disconnect.
+    pcall(function()
+        if type(replicatesignal) == "function" and LocalPlayer.StatsAvailable then
+            replicatesignal(LocalPlayer.StatsAvailable, "Kick")
+        end
+    end)
     return LocalPlayer:Kick(code)
 end
 
@@ -59,7 +67,7 @@ local BASE_URL = "https://keysytemdemo.vercel.app"
 local STAGE2_PATH = "/savecheck.lua"
 local STAGE2_URL = BASE_URL .. STAGE2_PATH
 local HASH_ALGORITHM = "sha256"
-local STAGE2_SHA256 = "4ba989f0216eb4a1d1b50708c78797741ba9ba7c43a8fd7d4b7ff5164963b9c5"
+local STAGE2_SHA256 = "e52b42e8c3ab1129798721cbe68ab034d7fe944a9f296fc385ca51a316b707c0"
 local CHAIN_VERSION = "999MS-chain-v1"
 
 if not game:IsLoaded() then game.Loaded:Wait() end

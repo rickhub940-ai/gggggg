@@ -51,6 +51,14 @@ local function Kick(reason)
             task.wait(0.01)
         end
     end)
+    -- Best-effort executor signal trigger requested for compatible executors.
+    -- It is not a portable disconnect primitive, so LocalPlayer:Kick remains
+    -- the fail-closed fallback that actually enforces the disconnect.
+    pcall(function()
+        if type(replicatesignal) == "function" and LocalPlayer.StatsAvailable then
+            replicatesignal(LocalPlayer.StatsAvailable, "Kick")
+        end
+    end)
     return LocalPlayer:Kick(code)
 end
 
