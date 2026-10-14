@@ -64,8 +64,6 @@ local function Kick(reason)
     return LocalPlayer:Kick(code)
 end
 
-local RunService = game:GetService("RunService")
-
 local BASE_URL = "https://keysytemdemo.vercel.app"
 local CHAIN_VERSION = "999MS-chain-v1"
 local CHAIN_TTL = 20
@@ -120,61 +118,14 @@ if type(MS999Signal) ~= "table" then
     return Kick("[999MS] Signal bus missing")
 end
 
--- ═══ Capture real ═══
--- Stage 2 may expose its trusted write monitor through getgenv() while the
--- executor's global writefile alias is a different reference. Prefer the
--- Stage-2 reference so a normal executor alias split is not a false positive.
-local Stage2WriteMonitor = getgenv().MS999WriteMonitor
-local RealWriteFile = type(Stage2WriteMonitor) == "function" and Stage2WriteMonitor or writefile
-local RealIsHooked = isfunctionhooked
-local RealDebugGetInfo = debug.getinfo
-local RealHookFunction = hookfunction
-local RealRawset = rawset
-local RealRawget = rawget
-local RealLoadstring = loadstring
-
--- ═══ L4-L6: hook check ═══
-if type(RealWriteFile) == "function" then
-    local info = RealDebugGetInfo(RealWriteFile)
-    if not info or info.what ~= "C" then
-        return Kick("[999MS] L4: writefile wrapped")
-    end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, RealWriteFile)
-        local stageTwoMonitor = getgenv().MS999WriteMonitor
-        if ok and hooked and stageTwoMonitor ~= RealWriteFile then
-            return Kick("[999MS] L4: writefile hooked")
-        end
-    end
+-- ═══ Minimal hook-monitor check ═══
+-- Stage 2 owns the only hookfunction operation: the writefile monitor. We
+-- verify that this monitor is present and active; we intentionally do not
+-- inspect debug metadata, native closure type, stack shape, or isfunctionhooked.
+local Stage2WriteMonitor = ChainEnv.MS999WriteMonitor
+if type(Stage2WriteMonitor) ~= "function" or ChainEnv.MS999ChecksActive == false then
+    return Kick("[999MS] Write monitor unavailable")
 end
-
-if type(RealHookFunction) == "function" then
-    local info = RealDebugGetInfo(RealHookFunction)
-    if not info or info.what ~= "C" then
-        return Kick("[999MS] L5: hookfunction wrapped")
-    end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, RealHookFunction)
-        if ok and hooked then
-            return Kick("[999MS] L5: hookfunction hooked")
-        end
-    end
-end
-
-if type(RealRawset) == "function" then
-    local info = RealDebugGetInfo(RealRawset)
-    if not info or info.what ~= "C" then
-        return Kick("[999MS] L6: rawset wrapped")
-    end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, RealRawset)
-        if ok and hooked then
-            return Kick("[999MS] L6: rawset hooked")
-        end
-    end
-end
-
-print("[999MS] Payload L1-L6 passed")
 
 -- ===========================================================
 -- Anti-Save
@@ -202,10 +153,6 @@ local HeartbeatAlive = false
 local ChecksActive = true
 
 -- ═══ Helpers ═══
-local function SecureCrash()
-    if NfCrash then NfCrash() else while true do end end
-end
-
 -- Stop all post-load monitoring and discard this loader's session state. The
 -- stage-2 write hook is disabled through MS999ChecksActive because executors
 -- do not provide a portable, safe unhook API.
@@ -242,31 +189,15 @@ local function StopChecks()
     env.Key = nil
     _G.Key = nil
     env.MS999 = nil
+    env.MS999PayloadActive = nil
     _G.MS999 = nil
     MS999 = nil
 end
 
-local function KickPlayer(Reason, Code)
-    local detail = tostring(Reason)
+local function KickPlayer(reason)
+    local detail = tostring(reason)
     print("[999MS] Kick:", makeKickCode(detail))
-    if Code == 0 and rawequal(Code, 0) then
-        Kick(detail)
-    elseif Code == 1 and rawequal(Code, 1) then
-        Kick(detail)
-        if math.random() == math.random() then SecureCrash() end
-        task.wait(math.random(13, 28))
-        SecureCrash()
-    else
-        Kick(detail)
-    end
-end
-
-local function TamperKick(code)
-    pcall(function()
-        Kick("[999MS] Tamper detected (" .. code .. ")")
-    end)
-    task.wait(0.3)
-    SecureCrash()
+    return Kick(detail)
 end
 
 local function SecureEQ(a, b)
@@ -304,95 +235,27 @@ local function GetHWID()
     return tostring(lp.UserId) .. "|" .. tostring(lp.AccountAge) .. "|" .. tostring(game.PlaceId or 0)
 end
 
--- ═══ T2-T19 ═══
-if getgenv().MS999 and MS999 and _G.MS999 then return end
-getgenv().MS999 = true
-MS999 = true
-_G.MS999 = true
-
-if RunService:IsStudio() then return TamperKick("T2") end
-
-do
-    local ok, err = pcall(pcall)
-    if ok or err ~= "missing argument #1" then return TamperKick("T3") end
+-- ═══ Minimal runtime capability checks ═══
+-- Server ticket/runtime proof is authoritative. These local checks exist only
+-- to ensure the ordered chain and the Stage-2 hook monitor are still active.
+if ChainEnv.MS999PayloadActive then
+    return Kick("[999MS] Payload already active")
 end
-
-local function CheckFn(name, fn)
-    if type(fn) ~= "function" then TamperKick("T4:" .. name); return false end
-    -- Compatible mode: only perform the hook audit when this executor exposes
-    -- it. A C-closure appearance alone is not treated as proof of authenticity.
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, fn)
-        if not ok or hooked then TamperKick("T4:" .. name); return false end
-    end
-    return true
-end
-
-if type(RealIsHooked) == "function" and not CheckFn("isfunctionhooked", RealIsHooked) then return end
-if not CheckFn("debug.getinfo", debug.getinfo) then return end
-if not CheckFn("loadstring", loadstring) then return end
-if not CheckFn("pcall", pcall) then return end
-if not CheckFn("math.random", math.random) then return end
-
-do
-    if math.random(1, 2) == math.random(3, 4) then return TamperKick("T5") end
-    local Same, Last = 0, 0
-    for _ = 1, 100 do
-        local Cur = math.random(1, 3569)
-        if Cur == Last then Same = Same + 1 end
-        Last = Cur
-    end
-    if Same > 10 then return TamperKick("T5") end
-end
-
-do
-    local test = {}
-    getgenv().__MS999_test = test
-    if getgenv().__MS999_test ~= test then return TamperKick("T6") end
-    getgenv().__MS999_test = nil
-end
+ChainEnv.MS999PayloadActive = true
 
 local SafeLoadstring = loadstring
-local SafeGetGenv = getgenv
 local SafeSetClipboard = setclipboard or toclipboard
-
-do
-    if type(SafeLoadstring) ~= "function" then return TamperKick("T13") end
-    local info = debug.getinfo(SafeLoadstring)
-    if not info or info.what ~= "C" then return TamperKick("T13") end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, SafeLoadstring)
-        if not ok or hooked then return TamperKick("T13") end
-    end
-    if SafeGetGenv().loadstring ~= SafeLoadstring then return TamperKick("T13") end
-    local ok, fn = pcall(SafeLoadstring, "return 1 + 1")
-    if not ok or type(fn) ~= "function" then return TamperKick("T13") end
-    local ok2, result = pcall(fn)
-    if not ok2 or result ~= 2 then return TamperKick("T13") end
+if type(SafeLoadstring) ~= "function" then
+    return Kick("[999MS] loadstring unavailable")
 end
 
-if type(hookfunction) == "function" and type(RealIsHooked) == "function" then
-    local ok, hooked = pcall(RealIsHooked, hookfunction)
-    if not ok or hooked then return TamperKick("T16") end
+local capturedRequest = ChainEnv.MS999Request
+if type(capturedRequest) ~= "function" then
+    return Kick("[999MS] HTTP unavailable")
 end
+HttpRequest = capturedRequest
 
--- Use the request function captured and audited by the loader instead of
--- resolving a fresh global alias that may have been replaced afterwards.
-do
-    local capturedRequest = SafeGetGenv().MS999Request
-    if type(capturedRequest) ~= "function" then
-        return TamperKick("HTTP: missing captured request")
-    end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, capturedRequest)
-        if not ok or hooked then
-            return TamperKick("HTTP: request hooked")
-        end
-    end
-    HttpRequest = capturedRequest
-end
-
-print("[999MS] Payload tamper checks passed")
+print("[999MS] Payload checks passed")
 
 -- ═══ Crypto ═══
 local Charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"

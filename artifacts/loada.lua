@@ -145,13 +145,16 @@ if removeMarkedFiles() then
     return Kick("[999MS] Source save detected")
 end
 
--- Use the same Signal.new + hookfunction write detector as X.lua for files
--- created after this stage has started.
-if type(env.Signal) ~= "table" or type(env.Signal.new) ~= "function" then
-    return Kick("[999MS] Signal.new unavailable")
-end
-if type(env.writefile) ~= "function" or type(hookfunction) ~= "function"
-    or type(newcclosure) ~= "function" then
+-- Install one focused hookfunction monitor for source writes. This is a
+-- functional capability check: it verifies that the hook can be installed and
+-- returns an original callable. It deliberately avoids stack inspection,
+-- debug.getinfo, and isfunctionhooked because those can be changed by an
+-- obfuscator without indicating malicious behavior.
+local SafeHookFunction = hookfunction
+local SafeNewCClosure = newcclosure
+if type(env.Signal) ~= "table" or type(env.Signal.new) ~= "function"
+    or type(env.writefile) ~= "function" or type(SafeHookFunction) ~= "function"
+    or type(SafeNewCClosure) ~= "function" then
     return Kick("[999MS] Write monitor unavailable")
 end
 
@@ -162,10 +165,9 @@ local saveConnection
 
 env.MS999ChecksActive = true
 
-oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
+local installed, original = pcall(SafeHookFunction, target, SafeNewCClosure(function(path, contents, ...)
     local result = table.pack(pcall(oldWrite, path, contents, ...))
     local success = result[1] and result[2] ~= false
-
     if success and env.MS999ChecksActive ~= false then
         saved:Fire({
             api = "writefile",
@@ -173,29 +175,24 @@ oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
             bytes = typeof(contents) == "string" and #contents or nil,
         })
     end
-
-    if not result[1] then
-        error(result[2], 0)
-    end
+    if not result[1] then error(result[2], 0) end
     return table.unpack(result, 2, result.n)
 end))
+if not installed or type(original) ~= "function" then
+    env.MS999ChecksActive = false
+    return Kick("[999MS] Write monitor unavailable")
+end
+oldWrite = original
 
 saveConnection = saved:Connect(function(event)
     if env.MS999ChecksActive == false then return end
-
+    env.MS999ChecksActive = false
     if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
         pcall(function()
-            if RealIsFile(event.path) then
-                RealDelfile(event.path)
-            end
+            if RealIsFile(event.path) then RealDelfile(event.path) end
         end)
     end
-
-    pcall(function()
-        Kick("[999MS] Source save detected: " .. tostring(event.path))
-    end)
-    task.wait(0.3)
-    if NfCrash then NfCrash() else while true do end end
+    pcall(Kick, "[999MS] Source save detected: " .. tostring(event.path))
 end)
 
 -- Called by the UI on close and after a successful main-script launch. The

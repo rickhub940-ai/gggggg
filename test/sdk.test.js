@@ -57,7 +57,7 @@ const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'verc
 const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8');
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-assert.equal(loadaSha, 'e52b42e8c3ab1129798721cbe68ab034d7fe944a9f296fc385ca51a316b707c0');
+assert.equal(loadaSha, 'd1ba29904dc158a7db7d58714b0b87f992599762e8aacd98027a6a5ce718b1bb');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /local d="__LOADA_D__"/);
 assert.match(loadcSource, /local n="__LOADA_N__"/);
@@ -94,10 +94,22 @@ assert.match(payloadLuaSource, /chainIs\("loader", CHAIN_TTL\)/);
 assert.match(payloadLuaSource, /Chain\.Stage = "payload"/);
 assert.match(payloadLuaSource, /Chain\.Stage = "script"/);
 assert.match(mainSource, /Chain\.Stage ~= "script"/);
-assert.match(loaderSource, /local Stage2WriteMonitor = getgenv\(\)\.MS999WriteMonitor/);
-assert.match(loaderSource, /RealWriteFile = type\(Stage2WriteMonitor\) == "function" and Stage2WriteMonitor/);
-assert.match(payloadLuaSource, /local Stage2WriteMonitor = getgenv\(\)\.MS999WriteMonitor/);
-assert.match(payloadLuaSource, /RealWriteFile = type\(Stage2WriteMonitor\) == "function" and Stage2WriteMonitor or writefile/);
+// Hook protection is intentionally capability-based: Stage 2 installs the
+// sole writefile monitor, while downstream stages only require that monitor to
+// remain present/active. Do not reintroduce stack, C-closure, or hook-scanner
+// checks here; obfuscators can alter those properties legitimately.
+assert.match(stageTwoSource, /local SafeHookFunction = hookfunction/);
+assert.match(stageTwoSource, /pcall\(SafeHookFunction, target, SafeNewCClosure/);
+assert.match(loaderSource, /local Stage2WriteMonitor = ChainEnv\.MS999WriteMonitor/);
+assert.match(loaderSource, /ChainEnv\.MS999ChecksActive == false/);
+assert.match(payloadLuaSource, /local Stage2WriteMonitor = ChainEnv\.MS999WriteMonitor/);
+assert.match(payloadLuaSource, /ChainEnv\.MS999ChecksActive == false/);
+for (const source of [stageTwoSource, loaderSource, payloadLuaSource]) {
+  assert.doesNotMatch(source, /\bisfunctionhooked\s*\(/);
+  assert.doesNotMatch(source, /\bdebug\.getinfo\s*\(/);
+}
+assert.doesNotMatch(stageTwoSource, /\bNfCrash\b/);
+assert.doesNotMatch(payloadLuaSource, /\bNfCrash\b|\bSecureCrash\b|\bTamperKick\b/);
 
 assert.equal(isValidScriptName('main'), true);
 assert.equal(isValidScriptName('main-v2_1'), true);
