@@ -63,6 +63,10 @@ assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:K
 assert.match(authSource, /action === 'bootstrap'/);
 assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
 assert.equal(vercelConfig.rewrites.some((entry) => entry.source === '/api/bootstrap' && entry.destination === '/api/auth?action=bootstrap'), true);
+for (const name of ['loadc', 'savecheck', 'loader', 'sdk']) {
+  assert.equal(vercelConfig.rewrites.some((entry) => entry.destination === `/api/auth?action=artifact&name=${name}`), true);
+}
+assert.equal(vercelConfig.rewrites.some((entry) => entry.source === '/:path*' && entry.destination === '/api/auth?action=trap'), true);
 assert.match(stageTwoSource, /chainIs\("stage1", CHAIN_TTL\)/);
 assert.match(stageTwoSource, /chain\.Stage = "stage2"/);
 assert.match(loaderSource, /chainIs\("stage2", CHAIN_TTL\)/);
@@ -124,7 +128,7 @@ assert.notEqual(decodedTicketOne.jti, decodedTicketTwo.jti);
 if (previousTicketSecret === undefined) delete process.env.TICKET_SECRET;
 else process.env.TICKET_SECRET = previousTicketSecret;
 
-async function requestBootstrap() {
+async function requestEndpoint(url, headers = {}) {
   const response = {
     headers: {},
     statusCode: null,
@@ -135,23 +139,33 @@ async function requestBootstrap() {
     send(value) { this.body = value; return this; },
   };
   await authHandler({
-    url: '/api/auth?action=bootstrap',
+    url,
     method: 'GET',
-    headers: {},
+    headers,
     socket: { remoteAddress: 'sdk-test' },
   }, response);
   return response;
 }
 
 (async () => {
-  const firstBootstrap = await requestBootstrap();
-  const secondBootstrap = await requestBootstrap();
+  const firstBootstrap = await requestEndpoint('/api/auth?action=bootstrap');
+  const secondBootstrap = await requestEndpoint('/api/auth?action=bootstrap');
   assert.equal(firstBootstrap.statusCode, 200);
   assert.equal(secondBootstrap.statusCode, 200);
   assert.match(firstBootstrap.body.id, /^[a-f0-9]{64}$/);
   assert.match(secondBootstrap.body.id, /^[a-f0-9]{64}$/);
   assert.notEqual(firstBootstrap.body.id, secondBootstrap.body.id);
-  console.log('PASS 999MS Server SDK, randomized ticket, and bootstrap tests');
+
+  const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
+  const browserArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', { 'user-agent': 'Mozilla/5.0' });
+  const unknownPath = await requestEndpoint('/api/auth?action=trap');
+  assert.equal(executorArtifact.statusCode, 200);
+  assert.match(executorArtifact.body, /api\/bootstrap/);
+  assert.equal(browserArtifact.statusCode, 302);
+  assert.equal(browserArtifact.headers.Location, 'https://yura.lol/09ms');
+  assert.equal(unknownPath.statusCode, 302);
+  assert.equal(unknownPath.headers.Location, 'https://yura.lol/09ms');
+  console.log('PASS 999MS Server SDK, randomized ticket, bootstrap, and browser trap tests');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

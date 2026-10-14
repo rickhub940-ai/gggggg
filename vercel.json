@@ -14,11 +14,16 @@
   ],
   "rewrites": [
     { "source": "/payload.lua",        "destination": "/api/auth?action=payload"        },
+    { "source": "/loadc.lua",          "destination": "/api/auth?action=artifact&name=loadc" },
+    { "source": "/savecheck.lua",      "destination": "/api/auth?action=artifact&name=savecheck" },
+    { "source": "/loader.lua",         "destination": "/api/auth?action=artifact&name=loader" },
+    { "source": "/999MS-sdk.lua",      "destination": "/api/auth?action=artifact&name=sdk" },
     { "source": "/api/bootstrap",      "destination": "/api/auth?action=bootstrap"      },
     { "source": "/api/verify",         "destination": "/api/auth?action=verify"         },
     { "source": "/api/script",         "destination": "/api/auth?action=script"         },
     { "source": "/api/script-verify",  "destination": "/api/auth?action=script-verify"  },
     { "source": "/api/heartbeat",      "destination": "/api/auth?action=heartbeat"      },
-    { "source": "/api/start",          "destination": "/api/auth?action=start"          }
+    { "source": "/api/start",          "destination": "/api/auth?action=start"          },
+    { "source": "/:path*",             "destination": "/api/auth?action=trap"           }
   ]
 }

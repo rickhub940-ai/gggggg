@@ -20,6 +20,12 @@ const {
 const sessions = new Map();
 const SESSION_TTL = 30 * 60 * 1000;
 const RUNTIME_TTL = 60 * 1000;
+const PUBLIC_ARTIFACTS = Object.freeze({
+  loadc: 'loadc.lua',
+  savecheck: 'savecheck.lua',
+  loader: 'loader.lua',
+  sdk: '999MS-sdk.lua',
+});
 
 // ═══ Rate limit ═══
 const rateLimit = new Map();
@@ -92,6 +98,17 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // ═══ PUBLIC ARTIFACTS (GET) ═══
+  // Browser requests are trapped, while executor HTTP requests receive the
+  // raw stage artifact required by the ordered loader chain.
+  if (action === 'artifact') {
+    if (req.method !== 'GET' || isBrowserRequest(req)) return trapRedirect(res);
+    const name = req.query?.name || url.searchParams.get('name');
+    return serveArtifact(res, name);
+  }
+
+  if (action === 'trap') return trapRedirect(res);
+
   // ═══ BOOTSTRAP MARK (GET) ═══
   // This creates a fresh server-random chain identifier for Stage 1. It is
   // not an authorization ticket; key authorization remains /api/verify.
@@ -141,6 +158,20 @@ module.exports = async function handler(req, res) {
     return res.status(502).json({ error: 'Service unavailable' });
   }
 };
+
+function serveArtifact(res, name) {
+  const filename = PUBLIC_ARTIFACTS[name];
+  if (!filename) return trapRedirect(res);
+  try {
+    const body = fs.readFileSync(path.join(process.cwd(), 'public', filename), 'utf8');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).send(body);
+  } catch (error) {
+    console.error('[artifact]', error.message);
+    return res.status(404).send('Not Found');
+  }
+}
 
 // ═══ /api/bootstrap ═══
 function handleBootstrap(res) {
