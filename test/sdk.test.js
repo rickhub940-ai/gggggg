@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { issueTicket, verifyTicket } = require('../lib/ticket');
@@ -50,26 +51,37 @@ assert.deepEqual(multipliers.map((value, index) => [value, offsets[index]]), exp
 
 const loadcSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loadc.lua'), 'utf8');
 const authSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'auth.js'), 'utf8');
-const loadaToken = authSource.match(/const LOADA_ARTIFACT_TOKEN = '([a-f0-9]{64})';/)[1];
-const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
 const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loada.lua'), 'utf8');
+const loadaSha = crypto.createHash('sha256').update(stageTwoSource).digest('hex');
+const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
 const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8');
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
+assert.equal(loadaSha, 'e52b42e8c3ab1129798721cbe68ab034d7fe944a9f296fc385ca51a316b707c0');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /game:HttpGet\(b\.\."\/api\/bootstrap"\)/);
-assert.match(loadcSource, /b\.\."\/loada\.lua"/);
-assert.match(loadcSource, /\["X-999MS-Token"\]=n/);
-assert.match(loadcSource, new RegExp(`n="${loadaToken}"`));
+assert.match(loadcSource, /local u=b\.\."\/loada\.lua\/"\.\.d\.\."\/"\.\.n/);
+assert.doesNotMatch(loadcSource, /X-999MS-Token/);
+assert.match(loadcSource, new RegExp(`local h=\"${loadaSha}\"`));
+assert.match(loadcSource, /local d=o and type\(t\)=="table"and t\.d or nil/);
+assert.match(loadcSource, /local n=o and type\(t\)=="table"and t\.n or nil/);
+assert.doesNotMatch(loadcSource, /LOADA_ARTIFACT_TOKEN|dae7f78cb31c846b50b01d3866ff0f2266d08ee89453ed6aea20eea46131ae6b/);
 assert.match(loadcSource, /Id=id,Stage="stage1"/);
 assert.match(loadcSource, /e\.MS999Chain=nil/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick|\berror\(/);
 assert.match(authSource, /action === 'bootstrap'/);
 assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
+assert.match(authSource, /crypto\.randomBytes\(26\)\.toString\('hex'\)/);
+assert.match(authSource, /function createLoadaPathCapability\(\)/);
+assert.match(authSource, /const LOADA_PATH_TTL = 20 \* 1000/);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap' && entry.dest === '/api/auth?action=bootstrap'), true);
-for (const name of ['loadc', 'loada', 'loader', 'sdk']) {
+for (const name of ['loadc', 'loader', 'sdk']) {
   assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);
 }
+assert.equal(vercelConfig.routes.some((entry) => (
+  entry.src === '/loada\\.lua/([^/]+)/([^/]+)' &&
+  entry.dest === '/api/auth?action=artifact&name=loada&d=$1&n=$2'
+)), true);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.dest === '/api/auth?action=trap'), true);
 assert.match(stageTwoSource, /chainIs\("stage1", CHAIN_TTL\)/);
 assert.match(stageTwoSource, /chain\.Stage = "stage2"/);
@@ -132,6 +144,9 @@ assert.notEqual(decodedTicketOne.jti, decodedTicketTwo.jti);
 if (previousTicketSecret === undefined) delete process.env.TICKET_SECRET;
 else process.env.TICKET_SECRET = previousTicketSecret;
 
+const previousLoadaPathSecret = process.env.LOADA_PATH_SECRET;
+process.env.LOADA_PATH_SECRET = 'test-loada-path-secret-with-at-least-thirty-two-characters';
+
 async function requestEndpoint(url, headers = {}) {
   const response = {
     headers: {},
@@ -158,7 +173,13 @@ async function requestEndpoint(url, headers = {}) {
   assert.equal(secondBootstrap.statusCode, 200);
   assert.match(firstBootstrap.body.id, /^[a-f0-9]{64}$/);
   assert.match(secondBootstrap.body.id, /^[a-f0-9]{64}$/);
+  assert.match(firstBootstrap.body.d, /^[a-f0-9]{64}$/);
+  assert.match(firstBootstrap.body.n, /^[a-f0-9]{64}$/);
+  assert.match(secondBootstrap.body.d, /^[a-f0-9]{64}$/);
+  assert.match(secondBootstrap.body.n, /^[a-f0-9]{64}$/);
   assert.notEqual(firstBootstrap.body.id, secondBootstrap.body.id);
+  assert.notEqual(firstBootstrap.body.d, secondBootstrap.body.d);
+  assert.notEqual(firstBootstrap.body.n, secondBootstrap.body.n);
 
   const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
   const browserArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', { 'user-agent': 'Mozilla/5.0' });
@@ -166,28 +187,50 @@ async function requestEndpoint(url, headers = {}) {
     'user-agent': 'Mozilla/5.0',
     'x-client': 'rObLoX',
   });
-  const loadaWithoutToken = await requestEndpoint('/api/auth?action=artifact&name=loada', { 'X-Client': 'ROBLOX' });
-  const loadaWithToken = await requestEndpoint('/api/auth?action=artifact&name=loada', {
+  const loadaWithoutPathToken = await requestEndpoint('/api/auth?action=artifact&name=loada', { 'X-Client': 'ROBLOX' });
+  const loadaWrongPathToken = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstBootstrap.body.d}&n=${'0'.repeat(64)}`, { 'X-Client': 'ROBLOX' });
+  const loadaHeaderOnly = await requestEndpoint('/api/auth?action=artifact&name=loada', {
     'X-Client': 'ROBLOX',
-    'X-999MS-Token': loadaToken,
+    'X-999MS-Token': 'legacy-header-token-is-not-used',
   });
+  const loadaWithPathToken = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstBootstrap.body.d}&n=${firstBootstrap.body.n}`, {
+    'X-Client': 'ROBLOX',
+  });
+  const loadaBrowserPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstBootstrap.body.d}&n=${firstBootstrap.body.n}`, {
+    'user-agent': 'Mozilla/5.0',
+  });
+  const actualNow = Date.now;
+  Date.now = () => actualNow() + 20001;
+  const loadaExpiredPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstBootstrap.body.d}&n=${firstBootstrap.body.n}`, {
+    'X-Client': 'ROBLOX',
+  });
+  Date.now = actualNow;
   const unknownPath = await requestEndpoint('/api/auth?action=trap');
   const robloxUnknownPath = await requestEndpoint('/api/auth?action=trap', { 'X-Roblox': 'CLIENT' });
   assert.equal(executorArtifact.statusCode, 200);
   assert.match(executorArtifact.body, /api\/bootstrap/);
   assert.equal(robloxArtifact.statusCode, 200);
   assert.match(robloxArtifact.body, /api\/bootstrap/);
-  assert.equal(loadaWithoutToken.statusCode, 404);
-  assert.equal(loadaWithToken.statusCode, 200);
-  assert.match(loadaWithToken.body, /^-- supper_Boom/);
+  assert.equal(loadaWithoutPathToken.statusCode, 404);
+  assert.equal(loadaWrongPathToken.statusCode, 404);
+  assert.equal(loadaHeaderOnly.statusCode, 404);
+  assert.equal(loadaWithPathToken.statusCode, 200);
+  assert.match(loadaWithPathToken.body, /^-- supper_Boom/);
+  assert.equal(loadaBrowserPath.statusCode, 302);
+  assert.equal(loadaBrowserPath.headers.Location, 'https://yura.lol/09ms');
+  assert.equal(loadaExpiredPath.statusCode, 404);
   assert.equal(browserArtifact.statusCode, 302);
   assert.equal(browserArtifact.headers.Location, 'https://yura.lol/09ms');
   assert.equal(unknownPath.statusCode, 302);
   assert.equal(unknownPath.headers.Location, 'https://yura.lol/09ms');
   assert.equal(robloxUnknownPath.statusCode, 404);
   assert.equal(robloxUnknownPath.headers.Location, undefined);
-  console.log('PASS 999MS Server SDK, randomized ticket, bootstrap, and browser trap tests');
+  if (previousLoadaPathSecret === undefined) delete process.env.LOADA_PATH_SECRET;
+  else process.env.LOADA_PATH_SECRET = previousLoadaPathSecret;
+  console.log('PASS 999MS Server SDK, randomized bootstrap capabilities, and browser trap tests');
 })().catch((error) => {
+  if (previousLoadaPathSecret === undefined) delete process.env.LOADA_PATH_SECRET;
+  else process.env.LOADA_PATH_SECRET = previousLoadaPathSecret;
   console.error(error);
   process.exitCode = 1;
 });

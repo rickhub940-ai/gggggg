@@ -20,7 +20,7 @@ const {
 const sessions = new Map();
 const SESSION_TTL = 30 * 60 * 1000;
 const RUNTIME_TTL = 60 * 1000;
-const LOADA_ARTIFACT_TOKEN = 'dae7f78cb31c846b50b01d3866ff0f2266d08ee89453ed6aea20eea46131ae6b';
+const LOADA_PATH_TTL = 20 * 1000;
 const PUBLIC_ARTIFACTS = Object.freeze({
   loadc: 'loadc.lua',
   loada: 'loada.lua',
@@ -84,18 +84,48 @@ function hasRobloxHeader(req) {
   return false;
 }
 
-function hasLoadaToken(req) {
-  let supplied = null;
-  for (const [name, value] of Object.entries(req.headers || {})) {
-    if (name.toLowerCase() === 'x-999ms-token') {
-      supplied = Array.isArray(value) ? value[0] : value;
-      break;
-    }
-  }
-  if (typeof supplied !== 'string') return false;
-  const expected = Buffer.from(LOADA_ARTIFACT_TOKEN, 'utf8');
+function timingSafeStringEquals(supplied, expectedValue) {
+  if (typeof supplied !== 'string' || typeof expectedValue !== 'string') return false;
+  const expected = Buffer.from(expectedValue, 'utf8');
   const candidate = Buffer.from(supplied, 'utf8');
   return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+}
+
+// LOADA_PATH_SECRET is optional when the already-required TICKET_SECRET is
+// present. Keeping the capability stateless lets a bootstrap request and its
+// Stage-2 fetch land on different Vercel instances without a database.
+function loadaPathSecret() {
+  const secret = process.env.LOADA_PATH_SECRET || process.env.TICKET_SECRET;
+  return typeof secret === 'string' && secret.length >= 32 ? secret : null;
+}
+
+function signLoadaPath(d, secret) {
+  return crypto.createHmac('sha256', secret).update(`loada-v1:${d}`).digest('hex');
+}
+
+function createLoadaPathCapability() {
+  const secret = loadaPathSecret();
+  if (!secret) return null;
+  // d is a server-fresh millisecond timestamp plus 26 cryptographically random
+  // bytes; n is a server-only HMAC of d. Both values differ on every bootstrap.
+  const d = Date.now().toString(16).padStart(12, '0') +
+    crypto.randomBytes(26).toString('hex');
+  return { d, n: signLoadaPath(d, secret) };
+}
+
+// Stage 2 is available only at /loada.lua/<d>/<n>. d/n are minted by
+// /api/bootstrap and expire quickly. They are independent of the Roblox
+// browser-classification bypass and are verified without server-side storage.
+function hasLoadaPathCapability(req, url) {
+  const d = req.query?.d || url.searchParams.get('d');
+  const n = req.query?.n || url.searchParams.get('n');
+  if (typeof d !== 'string' || !/^[a-f0-9]{64}$/.test(d)) return false;
+  if (typeof n !== 'string' || !/^[a-f0-9]{64}$/.test(n)) return false;
+  const issuedAt = Number.parseInt(d.slice(0, 12), 16);
+  const now = Date.now();
+  if (!Number.isSafeInteger(issuedAt) || issuedAt > now + 5000 || now - issuedAt > LOADA_PATH_TTL) return false;
+  const secret = loadaPathSecret();
+  return !!secret && timingSafeStringEquals(n, signLoadaPath(d, secret));
 }
 
 function isBrowserRequest(req) {
@@ -142,7 +172,7 @@ module.exports = async function handler(req, res) {
     if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
     if (isBrowserRequest(req)) return trapRedirect(res);
     const name = req.query?.name || url.searchParams.get('name');
-    return serveArtifact(req, res, name);
+    return serveArtifact(req, res, name, url);
   }
 
   if (action === 'trap') return rejectOrTrap(req, res);
@@ -198,10 +228,10 @@ module.exports = async function handler(req, res) {
   }
 };
 
-function serveArtifact(req, res, name) {
+function serveArtifact(req, res, name, url) {
   const filename = PUBLIC_ARTIFACTS[name];
   if (!filename) return rejectOrTrap(req, res);
-  if (name === 'loada' && !hasLoadaToken(req)) return rejectOrTrap(req, res);
+  if (name === 'loada' && !hasLoadaPathCapability(req, url)) return rejectOrTrap(req, res);
   try {
     const body = fs.readFileSync(path.join(process.cwd(), 'artifacts', filename), 'utf8');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -215,7 +245,13 @@ function serveArtifact(req, res, name) {
 
 // ═══ /api/bootstrap ═══
 function handleBootstrap(res) {
-  return res.status(200).json({ id: crypto.randomBytes(32).toString('hex') });
+  const capability = createLoadaPathCapability();
+  if (!capability) return res.status(503).json({ error: 'Unavailable' });
+  return res.status(200).json({
+    id: crypto.randomBytes(32).toString('hex'),
+    d: capability.d,
+    n: capability.n,
+  });
 }
 
 // ═══ /api/verify ═══
