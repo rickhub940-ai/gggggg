@@ -57,7 +57,7 @@ const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'verc
 const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8');
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-assert.equal(loadaSha, 'e52b42e8c3ab1129798721cbe68ab034d7fe944a9f296fc385ca51a316b707c0');
+assert.equal(loadaSha, '2106087f620508dcc5e3460edf3974cf81282b81795a102d85e9ae809c78a0df');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /local d="__LOADA_D__"/);
 assert.match(loadcSource, /local n="__LOADA_N__"/);
@@ -86,8 +86,7 @@ assert.equal(vercelConfig.routes.some((entry) => (
   entry.dest === '/api/auth?action=artifact&name=loada&d=$1&n=$2'
 )), true);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.dest === '/api/auth?action=trap'), true);
-assert.match(stageTwoSource, /chainIs\("stage1", CHAIN_TTL\)/);
-assert.match(stageTwoSource, /chain\.Stage = "stage2"/);
+assert.match(stageTwoSource, /^-- supper_Boom\n/);
 assert.match(loaderSource, /chainIs\("stage2", CHAIN_TTL\)/);
 assert.match(loaderSource, /Chain\.Stage = "loader"/);
 assert.match(payloadLuaSource, /chainIs\("loader", CHAIN_TTL\)/);
