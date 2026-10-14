@@ -62,11 +62,11 @@ assert.match(loadcSource, /e\.MS999Chain=nil/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick|\berror\(/);
 assert.match(authSource, /action === 'bootstrap'/);
 assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
-assert.equal(vercelConfig.rewrites.some((entry) => entry.source === '/api/bootstrap' && entry.destination === '/api/auth?action=bootstrap'), true);
+assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap' && entry.dest === '/api/auth?action=bootstrap'), true);
 for (const name of ['loadc', 'savecheck', 'loader', 'sdk']) {
-  assert.equal(vercelConfig.rewrites.some((entry) => entry.destination === `/api/auth?action=artifact&name=${name}`), true);
+  assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);
 }
-assert.equal(vercelConfig.rewrites.some((entry) => entry.source === '/:path*' && entry.destination === '/api/auth?action=trap'), true);
+assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.dest === '/api/auth?action=trap'), true);
 assert.match(stageTwoSource, /chainIs\("stage1", CHAIN_TTL\)/);
 assert.match(stageTwoSource, /chain\.Stage = "stage2"/);
 assert.match(loaderSource, /chainIs\("stage2", CHAIN_TTL\)/);

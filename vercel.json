@@ -5,25 +5,18 @@
       "includeFiles": "{scripts,artifacts}/**"
     }
   },
-  "redirects": [
-    {
-      "source": "/",
-      "destination": "https://yura.lol/09ms",
-      "permanent": false
-    }
-  ],
-  "rewrites": [
-    { "source": "/payload.lua",        "destination": "/api/auth?action=payload"        },
-    { "source": "/loadc.lua",          "destination": "/api/auth?action=artifact&name=loadc" },
-    { "source": "/savecheck.lua",      "destination": "/api/auth?action=artifact&name=savecheck" },
-    { "source": "/loader.lua",         "destination": "/api/auth?action=artifact&name=loader" },
-    { "source": "/999MS-sdk.lua",      "destination": "/api/auth?action=artifact&name=sdk" },
-    { "source": "/api/bootstrap",      "destination": "/api/auth?action=bootstrap"      },
-    { "source": "/api/verify",         "destination": "/api/auth?action=verify"         },
-    { "source": "/api/script",         "destination": "/api/auth?action=script"         },
-    { "source": "/api/script-verify",  "destination": "/api/auth?action=script-verify"  },
-    { "source": "/api/heartbeat",      "destination": "/api/auth?action=heartbeat"      },
-    { "source": "/api/start",          "destination": "/api/auth?action=start"          },
-    { "source": "/:path*",             "destination": "/api/auth?action=trap"           }
+  "routes": [
+    { "src": "/payload\\.lua",       "dest": "/api/auth?action=payload" },
+    { "src": "/loadc\\.lua",         "dest": "/api/auth?action=artifact&name=loadc" },
+    { "src": "/savecheck\\.lua",     "dest": "/api/auth?action=artifact&name=savecheck" },
+    { "src": "/loader\\.lua",        "dest": "/api/auth?action=artifact&name=loader" },
+    { "src": "/999MS-sdk\\.lua",     "dest": "/api/auth?action=artifact&name=sdk" },
+    { "src": "/api/bootstrap",         "dest": "/api/auth?action=bootstrap" },
+    { "src": "/api/verify",            "dest": "/api/auth?action=verify" },
+    { "src": "/api/script",            "dest": "/api/auth?action=script" },
+    { "src": "/api/script-verify",     "dest": "/api/auth?action=script-verify" },
+    { "src": "/api/heartbeat",         "dest": "/api/auth?action=heartbeat" },
+    { "src": "/api/start",             "dest": "/api/auth?action=start" },
+    { "src": "/(.*)",                  "dest": "/api/auth?action=trap" }
   ]
 }
