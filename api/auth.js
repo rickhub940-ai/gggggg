@@ -87,7 +87,7 @@ module.exports = async function handler(req, res) {
   if (action === 'payload') {
     if (isBrowserRequest(req)) return trapRedirect(res);
     try {
-      const p = path.join(process.cwd(), 'public', 'payload.lua');
+      const p = path.join(process.cwd(), 'artifacts', 'payload.lua');
       const body = fs.readFileSync(p, 'utf8');
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Cache-Control', 'public, max-age=60');
@@ -163,7 +163,7 @@ function serveArtifact(res, name) {
   const filename = PUBLIC_ARTIFACTS[name];
   if (!filename) return trapRedirect(res);
   try {
-    const body = fs.readFileSync(path.join(process.cwd(), 'public', filename), 'utf8');
+    const body = fs.readFileSync(path.join(process.cwd(), 'artifacts', filename), 'utf8');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).send(body);

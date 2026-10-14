@@ -3,7 +3,7 @@
 โปรเจกต์นี้มี SDK สองฝั่งที่ใช้ protocol เดียวกับ `/api/auth`:
 
 - **Server SDK:** `lib/999MS-server-sdk.js`
-- **Client SDK:** `public/999MS-sdk.lua` — เมื่อ deploy แล้วใช้ได้ที่ `https://keysytemdemo.vercel.app/999MS-sdk.lua`
+- **Client SDK:** `artifacts/999MS-sdk.lua` — เมื่อ deploy แล้วใช้ได้ที่ `https://keysytemdemo.vercel.app/999MS-sdk.lua`
 
 SDK นี้ไม่ใช้ database และไม่แทนที่ Platoboost; server application ยังคงเป็นผู้ตรวจ key, ออก signed ticket, สร้าง runtime credential และตัดสินสิทธิ์จริง
 
@@ -114,6 +114,6 @@ assert(verified, verifyErr)
 
 ## Lifecycle ที่ใช้กับ loader ปัจจุบัน
 
-`public/payload.lua` ยังเป็น UI/loader production หลัก เพราะคง three-stage loader, UI cleanup และ anti-save lifecycle ที่กำหนดไว้แล้วไว้ครบ การเพิ่ม SDK ไม่ได้เปลี่ยน loader เป็น dynamic fetch ใหม่หรือทำให้ Stage 1 SHA pin เปลี่ยน
+`artifacts/payload.lua` ยังเป็น UI/loader production หลัก เพราะคง three-stage loader, UI cleanup และ anti-save lifecycle ที่กำหนดไว้แล้วไว้ครบ การเพิ่ม SDK ไม่ได้เปลี่ยน loader เป็น dynamic fetch ใหม่หรือทำให้ Stage 1 SHA pin เปลี่ยน
 
 ใช้ Client SDK เมื่อต้องการสร้าง UI หรือ loader อื่นที่คุยกับ API เดียวกัน ส่วน API เดิมใช้ Server SDK ภายในแล้ว

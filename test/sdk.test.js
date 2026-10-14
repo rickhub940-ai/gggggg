@@ -35,25 +35,25 @@ for (let index = 0; index < values.length; index += 1) {
 }
 
 const expectedTransforms = RNG_CHALLENGE_TRANSFORMS.map(({ multiplier, offset }) => [multiplier, offset]);
-const clientSdkSource = fs.readFileSync(path.join(__dirname, '..', 'public', '999MS-sdk.lua'), 'utf8');
+const clientSdkSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8');
 const clientSdkTransforms = [...clientSdkSource.matchAll(
   /\{ multiplier = (-?\d+), offset = (-?\d+) \}/g,
 )].map((match) => [Number(match[1]), Number(match[2])]);
 assert.deepEqual(clientSdkTransforms, expectedTransforms);
 
-const payloadSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'payload.lua'), 'utf8');
+const payloadSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
 const multipliers = payloadSource.match(/local ChallengeMultipliers = \{ ([^}]+) \}/)[1]
   .split(',').map((value) => Number(value.trim()));
 const offsets = payloadSource.match(/local ChallengeOffsets = \{ ([^}]+) \}/)[1]
   .split(',').map((value) => Number(value.trim()));
 assert.deepEqual(multipliers.map((value, index) => [value, offsets[index]]), expectedTransforms);
 
-const loadcSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'loadc.lua'), 'utf8');
+const loadcSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loadc.lua'), 'utf8');
 const authSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'auth.js'), 'utf8');
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
-const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'savecheck.lua'), 'utf8');
-const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'loader.lua'), 'utf8');
-const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'payload.lua'), 'utf8');
+const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'savecheck.lua'), 'utf8');
+const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8');
+const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /game:HttpGet\(b\.\."\/api\/bootstrap"\)/);
