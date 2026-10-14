@@ -12,7 +12,7 @@ const {
   decodeProtectedPayload,
   createRuntimeCredentials,
   verifyRuntimeProof,
-} = require('../lib/luasec-server-sdk');
+} = require('../lib/999MS-server-sdk');
 
 const values = [1, 73, 2048, 999999, -19];
 const clientChallenge = {
@@ -33,7 +33,7 @@ for (let index = 0; index < values.length; index += 1) {
 }
 
 const expectedTransforms = RNG_CHALLENGE_TRANSFORMS.map(({ multiplier, offset }) => [multiplier, offset]);
-const clientSdkSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'luasec-sdk.lua'), 'utf8');
+const clientSdkSource = fs.readFileSync(path.join(__dirname, '..', 'public', '999MS-sdk.lua'), 'utf8');
 const clientSdkTransforms = [...clientSdkSource.matchAll(
   /\{ multiplier = (-?\d+), offset = (-?\d+) \}/g,
 )].map((match) => [Number(match[1]), Number(match[2])]);
@@ -80,4 +80,4 @@ assert.equal(verifyRuntimeProof({ ...proof, runtimeSecret: '0'.repeat(64) }), 's
 assert.equal(verifyRuntimeProof({ ...proof, hwidHash: 'b'.repeat(64) }), 'hwid mismatch');
 assert.equal(verifyRuntimeProof({ ...proof, session: { ...session, verified: true } }), 'already verified');
 
-console.log('PASS Luasec Server SDK protocol tests');
+console.log('PASS 999MS Server SDK protocol tests');

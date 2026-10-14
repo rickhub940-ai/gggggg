@@ -59,18 +59,18 @@ local function removeMarkedFiles()
 end
 
 if removeMarkedFiles() then
-    return Players.LocalPlayer:Kick("[Luasec] Source save detected")
+    return Players.LocalPlayer:Kick("[999MS] Source save detected")
 end
 
 -- Use the same Signal.new + hookfunction write detector as X.lua for files
 -- created after this stage has started.
 local env = getgenv()
 if type(env.Signal) ~= "table" or type(env.Signal.new) ~= "function" then
-    return Players.LocalPlayer:Kick("[Luasec] Signal.new unavailable")
+    return Players.LocalPlayer:Kick("[999MS] Signal.new unavailable")
 end
 if type(env.writefile) ~= "function" or type(hookfunction) ~= "function"
     or type(newcclosure) ~= "function" then
-    return Players.LocalPlayer:Kick("[Luasec] Write monitor unavailable")
+    return Players.LocalPlayer:Kick("[999MS] Write monitor unavailable")
 end
 
 local saved = env.Signal.new()
@@ -78,13 +78,13 @@ local target = env.writefile
 local oldWrite
 local saveConnection
 
-env.LuasecChecksActive = true
+env.MS999ChecksActive = true
 
 oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
     local result = table.pack(pcall(oldWrite, path, contents, ...))
     local success = result[1] and result[2] ~= false
 
-    if success and env.LuasecChecksActive ~= false then
+    if success and env.MS999ChecksActive ~= false then
         saved:Fire({
             api = "writefile",
             path = tostring(path),
@@ -99,7 +99,7 @@ oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
 end))
 
 saveConnection = saved:Connect(function(event)
-    if env.LuasecChecksActive == false then return end
+    if env.MS999ChecksActive == false then return end
 
     if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
         pcall(function()
@@ -110,7 +110,7 @@ saveConnection = saved:Connect(function(event)
     end
 
     pcall(function()
-        Players.LocalPlayer:Kick("[Luasec] Source save detected: " .. tostring(event.path))
+        Players.LocalPlayer:Kick("[999MS] Source save detected: " .. tostring(event.path))
     end)
     task.wait(0.3)
     if NfCrash then NfCrash() else while true do end end
@@ -119,21 +119,21 @@ end)
 -- Called by the UI on close and after a successful main-script launch. The
 -- hook itself cannot be safely removed across executors, so it is made inert
 -- and its signal subscription is disconnected.
-env.LuasecStopChecks = function()
-    env.LuasecChecksActive = false
+env.MS999StopChecks = function()
+    env.MS999ChecksActive = false
     if saveConnection and type(saveConnection.Disconnect) == "function" then
         pcall(function() saveConnection:Disconnect() end)
     end
-    env.LuasecWriteMonitor = nil
-    env.LuasecStopChecks = nil
+    env.MS999WriteMonitor = nil
+    env.MS999StopChecks = nil
 end
 
 -- Stage 3 recognizes this stage-owned writefile hook as trusted.
-env.LuasecWriteMonitor = target
+env.MS999WriteMonitor = target
 
 local requestFn = (syn and syn.request) or (http and http.request) or request or http_request
 if type(requestFn) ~= "function" then
-    return Players.LocalPlayer:Kick("[Luasec] HTTP not supported")
+    return Players.LocalPlayer:Kick("[999MS] HTTP not supported")
 end
 
 local ok, response = pcall(requestFn, {
@@ -141,15 +141,15 @@ local ok, response = pcall(requestFn, {
     Method = "GET",
 })
 if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
-    return Players.LocalPlayer:Kick("[Luasec] Loader fetch failed")
+    return Players.LocalPlayer:Kick("[999MS] Loader fetch failed")
 end
 
 local chunk = loadstring(response.Body or "")
 if type(chunk) ~= "function" then
-    return Players.LocalPlayer:Kick("[Luasec] Loader compile failed")
+    return Players.LocalPlayer:Kick("[999MS] Loader compile failed")
 end
 
 local runOk = pcall(chunk)
 if not runOk then
-    return Players.LocalPlayer:Kick("[Luasec] Loader runtime error")
+    return Players.LocalPlayer:Kick("[999MS] Loader runtime error")
 end

@@ -1,9 +1,9 @@
-# Luasec SDK
+# 999MS SDK
 
 โปรเจกต์นี้มี SDK สองฝั่งที่ใช้ protocol เดียวกับ `/api/auth`:
 
-- **Server SDK:** `lib/luasec-server-sdk.js`
-- **Client SDK:** `public/luasec-sdk.lua` — เมื่อ deploy แล้วใช้ได้ที่ `https://keysytemdemo.vercel.app/luasec-sdk.lua`
+- **Server SDK:** `lib/999MS-server-sdk.js`
+- **Client SDK:** `public/999MS-sdk.lua` — เมื่อ deploy แล้วใช้ได้ที่ `https://keysytemdemo.vercel.app/999MS-sdk.lua`
 
 SDK นี้ไม่ใช้ database และไม่แทนที่ Platoboost; server application ยังคงเป็นผู้ตรวจ key, ออก signed ticket, สร้าง runtime credential และตัดสินสิทธิ์จริง
 
@@ -11,7 +11,7 @@ SDK นี้ไม่ใช้ database และไม่แทนที่ Pl
 
 ## Server SDK
 
-`lib/luasec-server-sdk.js` แยก protocol ที่ใช้ร่วมกันออกจาก handler เพื่อใช้ซ้ำได้:
+`lib/999MS-server-sdk.js` แยก protocol ที่ใช้ร่วมกันออกจาก handler เพื่อใช้ซ้ำได้:
 
 - `validateClientChallenge(clientData)` ตรวจ RNG 5 ค่าและ `RngFloat` ที่เป็น non-integer
 - `createChallengeResponse(values)` สร้าง reversible response ด้วย transform คนละแบบต่อ component
@@ -29,7 +29,7 @@ const {
   validateClientChallenge,
   createChallengeResponse,
   encodeProtectedPayload,
-} = require('./lib/luasec-server-sdk');
+} = require('./lib/999MS-server-sdk');
 
 const rng = validateClientChallenge(clientData);
 if (!rng.ok) {
@@ -46,20 +46,20 @@ Ticket signing, key verification, revocation/rate limiting และ storage pol
 
 ## Client SDK
 
-Client SDK เป็น module Lua ที่ไม่สร้าง UI และไม่ทำ anti-save/hook detection เอง เพื่อให้ใช้กับ UI/loader ของคุณได้หลายแบบ ตัว loader ของโปรเจกต์นี้ยังคงเป็นตัวที่รับผิดชอบ stage checks และจะส่ง `getgenv().LuasecRequest` ที่ capture ไว้เข้า SDK ได้
+Client SDK เป็น module Lua ที่ไม่สร้าง UI และไม่ทำ anti-save/hook detection เอง เพื่อให้ใช้กับ UI/loader ของคุณได้หลายแบบ ตัว loader ของโปรเจกต์นี้ยังคงเป็นตัวที่รับผิดชอบ stage checks และจะส่ง `getgenv().MS999Request` ที่ capture ไว้เข้า SDK ได้
 
 ```lua
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
 -- ใช้ request ที่ loader capture ไว้ หากมี
-local requestFn = getgenv().LuasecRequest
+local requestFn = getgenv().MS999Request
 if type(requestFn) ~= "function" then
     error("A request function is required")
 end
 
 local SDK = loadstring(game:HttpGet(
-    "https://keysytemdemo.vercel.app/luasec-sdk.lua"
+    "https://keysytemdemo.vercel.app/999MS-sdk.lua"
 ))()
 
 local client, err = SDK.new({

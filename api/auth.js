@@ -11,7 +11,7 @@ const {
   decodeProtectedPayload,
   createRuntimeCredentials,
   verifyRuntimeProof,
-} = require('../lib/luasec-server-sdk');
+} = require('../lib/999MS-server-sdk');
 const {
   revokeHwid, revokeUser, revokeIp, checkRevoked, stats,
 } = require('../lib/revoke');

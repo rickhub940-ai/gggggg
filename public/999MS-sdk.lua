@@ -1,6 +1,6 @@
--- Luasec Client SDK v1
+-- 999MS Client SDK v1
 --
--- A portable client for the Luasec HTTP protocol. This module intentionally
+-- A portable client for the 999MS HTTP protocol. This module intentionally
 -- does not claim that client checks, C closures, or HTTP aliases are proof of
 -- authenticity. Authorization remains server-side through its signed ticket
 -- and short-lived runtime proof.
@@ -386,14 +386,14 @@ function Client:prepareRuntime(session, key)
     session = session or self.session
     if type(session) ~= "table" then return false, "session missing" end
     local env = getGlobalEnv()
-    env.LuasecLoader = true
-    env.LuasecTicket = session.ticket
-    env.LuasecToken = session.scriptToken
-    env.LuasecSecret = session.runtimeSecret
-    env.LuasecSession = session.serverId
-    env.LuasecScript = session.scriptName
-    env.LuasecLoadTime = tick and tick() or os.clock()
-    env.LuasecRequest = self.request
+    env.MS999Loader = true
+    env.MS999Ticket = session.ticket
+    env.MS999Token = session.scriptToken
+    env.MS999Secret = session.runtimeSecret
+    env.MS999Session = session.serverId
+    env.MS999Script = session.scriptName
+    env.MS999LoadTime = tick and tick() or os.clock()
+    env.MS999Request = self.request
     env.Key = key
     return true
 end
@@ -419,12 +419,12 @@ function Client:clear(clearRuntime)
     self.session = nil
     if clearRuntime then
         local env = getGlobalEnv()
-        env.LuasecTicket = nil
-        env.LuasecToken = nil
-        env.LuasecSecret = nil
-        env.LuasecSession = nil
-        env.LuasecScript = nil
-        env.LuasecLoadTime = nil
+        env.MS999Ticket = nil
+        env.MS999Token = nil
+        env.MS999Secret = nil
+        env.MS999Session = nil
+        env.MS999Script = nil
+        env.MS999LoadTime = nil
         env.Key = nil
     end
 end

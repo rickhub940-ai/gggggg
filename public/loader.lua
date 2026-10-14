@@ -1,5 +1,5 @@
 -- ===========================================================
--- Luasec Bootstrap + Anti (Signal-based + T-RAWSET)
+-- 999MS Bootstrap + Anti (Signal-based + T-RAWSET)
 -- Anti-Save ตามไฟล์ X 100%
 -- ===========================================================
 local Players = game:GetService("Players")
@@ -11,25 +11,25 @@ local BASE_URL = "https://keysytemdemo.vercel.app"
 local userScript = getgenv().script or _G.script
 if userScript == nil then
     return Players.LocalPlayer:Kick(
-        "[Luasec] Set getgenv().script first:\n\n" ..
+        "[999MS] Set getgenv().script first:\n\n" ..
         'getgenv().script = "scriptname"\n' ..
         'loadstring(game:HttpGet("' .. BASE_URL .. '/loadc.lua"))()'
     )
 end
 if type(userScript) ~= "string" then
-    return Players.LocalPlayer:Kick("[Luasec] getgenv().script must be string")
+    return Players.LocalPlayer:Kick("[999MS] getgenv().script must be string")
 end
 if #userScript < 1 or #userScript > 64 then
-    return Players.LocalPlayer:Kick("[Luasec] getgenv().script must be 1-64 chars")
+    return Players.LocalPlayer:Kick("[999MS] getgenv().script must be 1-64 chars")
 end
 if not userScript:match("^[%w_%-]+$") then
-    return Players.LocalPlayer:Kick("[Luasec] getgenv().script invalid format")
+    return Players.LocalPlayer:Kick("[999MS] getgenv().script invalid format")
 end
 
 local SCRIPT_NAME = userScript
 local SCRIPT_NAME_LOCKED = SCRIPT_NAME
 
-print("[Luasec] Bootstrap started")
+print("[999MS] Bootstrap started")
 
 -- ═══ Create Signal bus ═══
 local function createSignal()
@@ -54,43 +54,43 @@ local function createSignal()
     return signal
 end
 
-local LuasecSignal = getgenv().LuasecSignal
-if type(LuasecSignal) ~= "table"
-    or type(LuasecSignal.OnDetect) ~= "table"
-    or type(LuasecSignal.OnKick) ~= "table" then
-    LuasecSignal = {
+local MS999Signal = getgenv().MS999Signal
+if type(MS999Signal) ~= "table"
+    or type(MS999Signal.OnDetect) ~= "table"
+    or type(MS999Signal.OnKick) ~= "table" then
+    MS999Signal = {
         OnDetect = createSignal(),
         OnKick = createSignal(),
         OnLog = createSignal(),
         OnHookDetected = createSignal(),
     }
-    getgenv().LuasecSignal = LuasecSignal
+    getgenv().MS999Signal = MS999Signal
 end
 
 -- ═══ Subscribers ═══
-LuasecSignal.OnKick:Connect(function(reason)
-    print("[Luasec] KICK:", reason)
+MS999Signal.OnKick:Connect(function(reason)
+    print("[999MS] KICK:", reason)
     pcall(function()
-        Players.LocalPlayer:Kick("[Luasec] " .. reason)
+        Players.LocalPlayer:Kick("[999MS] " .. reason)
     end)
     task.wait(0.3)
     if NfCrash then NfCrash() else while true do end end
 end)
 
-LuasecSignal.OnLog:Connect(function(type, data)
-    print("[Luasec][LOG]", type, data and data.path or data or "")
+MS999Signal.OnLog:Connect(function(type, data)
+    print("[999MS][LOG]", type, data and data.path or data or "")
 end)
 
-LuasecSignal.OnDetect:Connect(function(event)
-    LuasecSignal.OnLog:Fire("detect", event)
+MS999Signal.OnDetect:Connect(function(event)
+    MS999Signal.OnLog:Fire("detect", event)
     if event.type == "payload_save" then
-        LuasecSignal.OnKick:Fire("Payload save detected: " .. tostring(event.path))
+        MS999Signal.OnKick:Fire("Payload save detected: " .. tostring(event.path))
     end
 end)
 
-LuasecSignal.OnHookDetected:Connect(function(event)
-    LuasecSignal.OnLog:Fire("hook_detected", event.name .. " - " .. event.reason)
-    LuasecSignal.OnKick:Fire("Hook detected: " .. event.name)
+MS999Signal.OnHookDetected:Connect(function(event)
+    MS999Signal.OnLog:Fire("hook_detected", event.name .. " - " .. event.reason)
+    MS999Signal.OnKick:Fire("Hook detected: " .. event.name)
 end)
 
 -- ═══ Capture real functions ═══
@@ -116,7 +116,7 @@ local function checkFunction(fn, name)
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, fn)
         local trustedWriteMonitor = name == "writefile"
-            and RealGetGenv().LuasecWriteMonitor == fn
+            and RealGetGenv().MS999WriteMonitor == fn
         if ok and hooked and not trustedWriteMonitor then return false, "hooked" end
     end
     if RealGetGenv()[name] and RealGetGenv()[name] ~= fn then
@@ -128,20 +128,20 @@ end
 local function guard(name, fn)
     local ok, reason = checkFunction(fn, name)
     if not ok then
-        LuasecSignal.OnHookDetected:Fire({ name = name, reason = reason })
+        MS999Signal.OnHookDetected:Fire({ name = name, reason = reason })
     end
 end
 
 -- ═══ T2: Studio check ═══
 if game:GetService("RunService"):IsStudio() then
-    return Players.LocalPlayer:Kick("[Luasec] T2: Studio detected")
+    return Players.LocalPlayer:Kick("[999MS] T2: Studio detected")
 end
 
 -- ═══ T3: pcall anti-hook ═══
 do
     local ok, err = pcall(pcall)
     if ok or err ~= "missing argument #1" then
-        return Players.LocalPlayer:Kick("[Luasec] T3: pcall hooked")
+        return Players.LocalPlayer:Kick("[999MS] T3: pcall hooked")
     end
 end
 
@@ -157,7 +157,7 @@ guard("rawget", RealRawget)
 -- ═══ T5: math.random behavior ═══
 do
     if math.random(1, 2) == math.random(3, 4) then
-        return Players.LocalPlayer:Kick("[Luasec] T5: math.random hooked")
+        return Players.LocalPlayer:Kick("[999MS] T5: math.random hooked")
     end
     local Same, Last = 0, 0
     for _ = 1, 100 do
@@ -166,18 +166,18 @@ do
         Last = Cur
     end
     if Same > 10 then
-        return Players.LocalPlayer:Kick("[Luasec] T5: math.random broken")
+        return Players.LocalPlayer:Kick("[999MS] T5: math.random broken")
     end
 end
 
 -- ═══ T6: getgenv integrity ═══
 do
     local test = {}
-    getgenv().__luasec_test = test
-    if getgenv().__luasec_test ~= test then
-        return Players.LocalPlayer:Kick("[Luasec] T6: getgenv tampered")
+    getgenv().__MS999_test = test
+    if getgenv().__MS999_test ~= test then
+        return Players.LocalPlayer:Kick("[999MS] T6: getgenv tampered")
     end
-    getgenv().__luasec_test = nil
+    getgenv().__MS999_test = nil
 end
 
 -- ═══ T13: loadstring protection ═══
@@ -215,7 +215,7 @@ local function loadstringWritesSource()
         return false
     end
 
-    local compiledOk, compiled = pcall(SafeLoadstring, "-- Luasec source-save probe\nreturn true")
+    local compiledOk, compiled = pcall(SafeLoadstring, "-- 999MS source-save probe\nreturn true")
     pcall(function() env.writefile = originalWrite end)
 
     -- Leave the existing T13 checks to report a broken loadstring implementation.
@@ -227,31 +227,31 @@ end
 
 do
     if type(SafeLoadstring) ~= "function" then
-        return Players.LocalPlayer:Kick("[Luasec] T13: loadstring missing")
+        return Players.LocalPlayer:Kick("[999MS] T13: loadstring missing")
     end
     local info = RealDebugGetInfo(SafeLoadstring)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[Luasec] T13: loadstring wrapped")
+        return Players.LocalPlayer:Kick("[999MS] T13: loadstring wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, SafeLoadstring)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[Luasec] T13: loadstring hooked")
+            return Players.LocalPlayer:Kick("[999MS] T13: loadstring hooked")
         end
     end
     if SafeGetGenv().loadstring ~= SafeLoadstring then
-        return Players.LocalPlayer:Kick("[Luasec] T13: getgenv().loadstring replaced")
+        return Players.LocalPlayer:Kick("[999MS] T13: getgenv().loadstring replaced")
     end
     if loadstringWritesSource() then
-        return Players.LocalPlayer:Kick("[Luasec] T13: loadstring attempted to save source")
+        return Players.LocalPlayer:Kick("[999MS] T13: loadstring attempted to save source")
     end
     local ok, fn = pcall(SafeLoadstring, "return 1 + 1")
     if not ok or type(fn) ~= "function" then
-        return Players.LocalPlayer:Kick("[Luasec] T13: loadstring broken")
+        return Players.LocalPlayer:Kick("[999MS] T13: loadstring broken")
     end
     local ok2, result = pcall(fn)
     if not ok2 or result ~= 2 then
-        return Players.LocalPlayer:Kick("[Luasec] T13: loadstring malfunction")
+        return Players.LocalPlayer:Kick("[999MS] T13: loadstring malfunction")
     end
 end
 
@@ -260,17 +260,17 @@ do
     if type(RealWriteFile) == "function" then
         local info = RealDebugGetInfo(RealWriteFile)
         if not info or info.what ~= "C" then
-            return Players.LocalPlayer:Kick("[Luasec] T14: writefile wrapped")
+            return Players.LocalPlayer:Kick("[999MS] T14: writefile wrapped")
         end
         if type(RealIsHooked) == "function" then
             local ok, hooked = pcall(RealIsHooked, RealWriteFile)
-            local trustedWriteMonitor = SafeGetGenv().LuasecWriteMonitor == RealWriteFile
+            local trustedWriteMonitor = SafeGetGenv().MS999WriteMonitor == RealWriteFile
             if ok and hooked and not trustedWriteMonitor then
-                return Players.LocalPlayer:Kick("[Luasec] T14: writefile hooked")
+                return Players.LocalPlayer:Kick("[999MS] T14: writefile hooked")
             end
         end
         if SafeGetGenv().writefile and SafeGetGenv().writefile ~= RealWriteFile then
-            return Players.LocalPlayer:Kick("[Luasec] T14: writefile replaced")
+            return Players.LocalPlayer:Kick("[999MS] T14: writefile replaced")
         end
     end
 end
@@ -280,12 +280,12 @@ do
     if type(RealHookFunction) == "function" then
         local info = RealDebugGetInfo(RealHookFunction)
         if not info or info.what ~= "C" then
-            return Players.LocalPlayer:Kick("[Luasec] T16: hookfunction wrapped")
+            return Players.LocalPlayer:Kick("[999MS] T16: hookfunction wrapped")
         end
         if type(RealIsHooked) == "function" then
             local ok, hooked = pcall(RealIsHooked, RealHookFunction)
             if ok and hooked then
-                return Players.LocalPlayer:Kick("[Luasec] T16: hookfunction hooked")
+                return Players.LocalPlayer:Kick("[999MS] T16: hookfunction hooked")
             end
         end
     end
@@ -294,43 +294,43 @@ end
 -- ═══ T-RAWSET1: rawset protection ═══
 do
     if type(RealRawset) ~= "function" then
-        return Players.LocalPlayer:Kick("[Luasec] T-RAWSET1: rawset missing")
+        return Players.LocalPlayer:Kick("[999MS] T-RAWSET1: rawset missing")
     end
     local info = RealDebugGetInfo(RealRawset)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[Luasec] T-RAWSET1: rawset wrapped")
+        return Players.LocalPlayer:Kick("[999MS] T-RAWSET1: rawset wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealRawset)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[Luasec] T-RAWSET1: rawset hooked")
+            return Players.LocalPlayer:Kick("[999MS] T-RAWSET1: rawset hooked")
         end
     end
     local t = {}
     pcall(RealRawset, t, "test", 12345)
     if t.test ~= 12345 then
-        return Players.LocalPlayer:Kick("[Luasec] T-RAWSET1: rawset broken")
+        return Players.LocalPlayer:Kick("[999MS] T-RAWSET1: rawset broken")
     end
 end
 
 -- ═══ T-RAWSET2: rawget protection ═══
 do
     if type(RealRawget) ~= "function" then
-        return Players.LocalPlayer:Kick("[Luasec] T-RAWSET2: rawget missing")
+        return Players.LocalPlayer:Kick("[999MS] T-RAWSET2: rawget missing")
     end
     local info = RealDebugGetInfo(RealRawget)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[Luasec] T-RAWSET2: rawget wrapped")
+        return Players.LocalPlayer:Kick("[999MS] T-RAWSET2: rawget wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealRawget)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[Luasec] T-RAWSET2: rawget hooked")
+            return Players.LocalPlayer:Kick("[999MS] T-RAWSET2: rawget hooked")
         end
     end
     local t = { test = 999 }
     if RealRawget(t, "test") ~= 999 then
-        return Players.LocalPlayer:Kick("[Luasec] T-RAWSET2: rawget broken")
+        return Players.LocalPlayer:Kick("[999MS] T-RAWSET2: rawget broken")
     end
 end
 
@@ -365,7 +365,7 @@ end
 do
     local ok, reason = checkGenvIntegrity()
     if not ok then
-        return Players.LocalPlayer:Kick("[Luasec] T-RAWSET3: " .. reason)
+        return Players.LocalPlayer:Kick("[999MS] T-RAWSET3: " .. reason)
     end
 end
 
@@ -417,13 +417,13 @@ do
     end
 
     if not RealHttpRequest then
-        return Players.LocalPlayer:Kick("[Luasec] No trusted HTTP request")
+        return Players.LocalPlayer:Kick("[999MS] No trusted HTTP request")
     end
 end
 
 local HttpRequest = RealHttpRequest
-getgenv().LuasecRequest = RealHttpRequest
-getgenv().LuasecRequestAudit = RequestAudit
+getgenv().MS999Request = RealHttpRequest
+getgenv().MS999RequestAudit = RequestAudit
 
 -- ═══ Stage 3: Anti checks ═══
 -- Stage 2 (savecheck.lua) completed its filesystem scan and installed the
@@ -435,72 +435,72 @@ do
     for _ = 1, 32 do
         dynamicPart = dynamicPart .. string.char(math.random(97, 122))
     end
-    getgenv().LuasecLoaderProof = "luasec_loader_v1:" .. dynamicPart
-    getgenv().LuasecLoaderTime = tick()
-    getgenv().LuasecLoaderMarker = "LSE_" .. tostring(math.random(100000, 999999))
+    getgenv().MS999LoaderProof = "999MS_loader_v1:" .. dynamicPart
+    getgenv().MS999LoaderTime = tick()
+    getgenv().MS999LoaderMarker = "LSE_" .. tostring(math.random(100000, 999999))
 end
 
--- ═══ T-RAWSET4: Luasec flags integrity snapshot ═══
-local LuasecFlagSnapshot = {
-    LuasecSignal = getgenv().LuasecSignal,
-    LuasecWriteMonitor = getgenv().LuasecWriteMonitor,
-    LuasecRequest = getgenv().LuasecRequest,
-    LuasecLoaderProof = getgenv().LuasecLoaderProof,
-    LuasecLoaderMarker = getgenv().LuasecLoaderMarker,
-    LuasecLoaderTime = getgenv().LuasecLoaderTime,
+-- ═══ T-RAWSET4: 999MS flags integrity snapshot ═══
+local MS999FlagSnapshot = {
+    MS999Signal = getgenv().MS999Signal,
+    MS999WriteMonitor = getgenv().MS999WriteMonitor,
+    MS999Request = getgenv().MS999Request,
+    MS999LoaderProof = getgenv().MS999LoaderProof,
+    MS999LoaderMarker = getgenv().MS999LoaderMarker,
+    MS999LoaderTime = getgenv().MS999LoaderTime,
 }
 
-local function checkLuasecFlags()
-    if getgenv().LuasecSignal ~= LuasecFlagSnapshot.LuasecSignal then
-        return false, "LuasecSignal replaced"
+local function checkMS999Flags()
+    if getgenv().MS999Signal ~= MS999FlagSnapshot.MS999Signal then
+        return false, "999MS signal replaced"
     end
-    if getgenv().LuasecWriteMonitor ~= LuasecFlagSnapshot.LuasecWriteMonitor
-        or LuasecFlagSnapshot.LuasecWriteMonitor ~= RealWriteFile then
+    if getgenv().MS999WriteMonitor ~= MS999FlagSnapshot.MS999WriteMonitor
+        or MS999FlagSnapshot.MS999WriteMonitor ~= RealWriteFile then
         return false, "write monitor replaced"
     end
-    if getgenv().LuasecRequest ~= LuasecFlagSnapshot.LuasecRequest
-        or LuasecFlagSnapshot.LuasecRequest ~= RealHttpRequest then
+    if getgenv().MS999Request ~= MS999FlagSnapshot.MS999Request
+        or MS999FlagSnapshot.MS999Request ~= RealHttpRequest then
         return false, "request replaced"
     end
-    if getgenv().LuasecLoaderProof ~= LuasecFlagSnapshot.LuasecLoaderProof then
-        return false, "LuasecLoaderProof replaced"
+    if getgenv().MS999LoaderProof ~= MS999FlagSnapshot.MS999LoaderProof then
+        return false, "999MS loader proof replaced"
     end
-    if getgenv().LuasecLoaderMarker ~= LuasecFlagSnapshot.LuasecLoaderMarker then
-        return false, "LuasecLoaderMarker replaced"
+    if getgenv().MS999LoaderMarker ~= MS999FlagSnapshot.MS999LoaderMarker then
+        return false, "999MS loader marker replaced"
     end
-    if getgenv().LuasecLoaderTime ~= LuasecFlagSnapshot.LuasecLoaderTime then
-        return false, "LuasecLoaderTime replaced"
+    if getgenv().MS999LoaderTime ~= MS999FlagSnapshot.MS999LoaderTime then
+        return false, "999MS loader time replaced"
     end
     return true
 end
 
 do
-    local ok, reason = checkLuasecFlags()
+    local ok, reason = checkMS999Flags()
     if not ok then
-        return Players.LocalPlayer:Kick("[Luasec] T-RAWSET4: " .. reason)
+        return Players.LocalPlayer:Kick("[999MS] T-RAWSET4: " .. reason)
     end
 end
 
-print("[Luasec] Anti-checks passed")
+print("[999MS] Anti-checks passed")
 
 -- ═══ โหลด payload ═══
-print("[Luasec] Fetching payload...")
+print("[999MS] Fetching payload...")
 local ok, response = pcall(HttpRequest, {
     Url = BASE_URL .. "/payload.lua",
     Method = "GET",
 })
 if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
-    return Players.LocalPlayer:Kick("[Luasec] Payload fetch failed")
+    return Players.LocalPlayer:Kick("[999MS] Payload fetch failed")
 end
 
 local payloadSrc = response.Body or ""
 if #payloadSrc < 100 then
-    return Players.LocalPlayer:Kick("[Luasec] Invalid payload")
+    return Players.LocalPlayer:Kick("[999MS] Invalid payload")
 end
 
-print("[Luasec] Payload received, running...")
+print("[999MS] Payload received, running...")
 
 local fn = SafeLoadstring(payloadSrc)
-if not fn then return Players.LocalPlayer:Kick("[Luasec] Load failed") end
+if not fn then return Players.LocalPlayer:Kick("[999MS] Load failed") end
 local runOk = pcall(fn)
-if not runOk then return Players.LocalPlayer:Kick("[Luasec] Runtime error") end
+if not runOk then return Players.LocalPlayer:Kick("[999MS] Runtime error") end

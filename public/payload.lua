@@ -1,5 +1,5 @@
 -- ===========================================================
--- Luasec Payload — UI + Platoboost + Anti-Save (แบบไฟล์ X)
+-- 999MS Payload — UI + Platoboost + Anti-Save (แบบไฟล์ X)
 -- ===========================================================
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
@@ -8,27 +8,27 @@ local RunService = game:GetService("RunService")
 local BASE_URL = "https://keysytemdemo.vercel.app"
 
 -- ═══ L1-L3: Loader Proof ═══
-local LoaderProof = getgenv().LuasecLoaderProof
-local LoaderTime = getgenv().LuasecLoaderTime
-local LoaderMarker = getgenv().LuasecLoaderMarker
+local LoaderProof = getgenv().MS999LoaderProof
+local LoaderTime = getgenv().MS999LoaderTime
+local LoaderMarker = getgenv().MS999LoaderMarker
 
 if type(LoaderProof) ~= "string" then
-    return Players.LocalPlayer:Kick("[Luasec] L1: Not run via loader")
+    return Players.LocalPlayer:Kick("[999MS] L1: Not run via loader")
 end
-if not LoaderProof:match("^luasec_loader_v1:[a-z]+$") then
-    return Players.LocalPlayer:Kick("[Luasec] L1: Invalid proof")
+if not LoaderProof:match("^999MS_loader_v1:[a-z]+$") then
+    return Players.LocalPlayer:Kick("[999MS] L1: Invalid proof")
 end
 if not LoaderTime or (tick() - LoaderTime) > 10 then
-    return Players.LocalPlayer:Kick("[Luasec] L2: Proof expired")
+    return Players.LocalPlayer:Kick("[999MS] L2: Proof expired")
 end
 if type(LoaderMarker) ~= "string" or not LoaderMarker:match("^LSE_%d+$") then
-    return Players.LocalPlayer:Kick("[Luasec] L3: Invalid marker")
+    return Players.LocalPlayer:Kick("[999MS] L3: Invalid marker")
 end
 
 -- ═══ Signal bus ═══
-local LuasecSignal = getgenv().LuasecSignal
-if type(LuasecSignal) ~= "table" then
-    return Players.LocalPlayer:Kick("[Luasec] Signal bus missing")
+local MS999Signal = getgenv().MS999Signal
+if type(MS999Signal) ~= "table" then
+    return Players.LocalPlayer:Kick("[999MS] Signal bus missing")
 end
 
 -- ═══ Capture real ═══
@@ -44,13 +44,13 @@ local RealLoadstring = loadstring
 if type(RealWriteFile) == "function" then
     local info = RealDebugGetInfo(RealWriteFile)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[Luasec] L4: writefile wrapped")
+        return Players.LocalPlayer:Kick("[999MS] L4: writefile wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealWriteFile)
-        local stageTwoMonitor = getgenv().LuasecWriteMonitor
+        local stageTwoMonitor = getgenv().MS999WriteMonitor
         if ok and hooked and stageTwoMonitor ~= RealWriteFile then
-            return Players.LocalPlayer:Kick("[Luasec] L4: writefile hooked")
+            return Players.LocalPlayer:Kick("[999MS] L4: writefile hooked")
         end
     end
 end
@@ -58,12 +58,12 @@ end
 if type(RealHookFunction) == "function" then
     local info = RealDebugGetInfo(RealHookFunction)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[Luasec] L5: hookfunction wrapped")
+        return Players.LocalPlayer:Kick("[999MS] L5: hookfunction wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealHookFunction)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[Luasec] L5: hookfunction hooked")
+            return Players.LocalPlayer:Kick("[999MS] L5: hookfunction hooked")
         end
     end
 end
@@ -71,23 +71,23 @@ end
 if type(RealRawset) == "function" then
     local info = RealDebugGetInfo(RealRawset)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[Luasec] L6: rawset wrapped")
+        return Players.LocalPlayer:Kick("[999MS] L6: rawset wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealRawset)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[Luasec] L6: rawset hooked")
+            return Players.LocalPlayer:Kick("[999MS] L6: rawset hooked")
         end
     end
 end
 
-print("[Luasec] Payload L1-L6 passed")
+print("[999MS] Payload L1-L6 passed")
 
 -- ===========================================================
 -- Anti-Save
 --
 -- The loader owns the writefile monitor and sends detections through
--- LuasecSignal.OnDetect.  Do not install a second hook here: it would require
+-- MS999Signal.OnDetect. Do not install a second hook here: it would require
 -- a non-standard env.Signal API and make the loader's hook look like tampering
 -- during this payload's L4 preflight.
 -- ===========================================================
@@ -114,7 +114,7 @@ local function SecureCrash()
 end
 
 -- Stop all post-load monitoring and discard this loader's session state. The
--- stage-2 write hook is disabled through LuasecChecksActive because executors
+-- stage-2 write hook is disabled through MS999ChecksActive because executors
 -- do not provide a portable, safe unhook API.
 local function StopChecks()
     if not ChecksActive then return end
@@ -125,33 +125,33 @@ local function StopChecks()
     XORKey = ""
 
     local env = getgenv()
-    local stopStageTwo = env.LuasecStopChecks
+    local stopStageTwo = env.MS999StopChecks
     if type(stopStageTwo) == "function" then
         pcall(stopStageTwo)
     else
-        env.LuasecChecksActive = false
-        env.LuasecWriteMonitor = nil
+        env.MS999ChecksActive = false
+        env.MS999WriteMonitor = nil
     end
 
-    env.LuasecLoader = nil
-    env.LuasecTicket = nil
-    env.LuasecToken = nil
-    env.LuasecSecret = nil
-    env.LuasecSession = nil
-    env.LuasecScript = nil
-    env.LuasecLoadTime = nil
-    env.LuasecSignal = nil
-    env.LuasecRequest = nil
-    env.LuasecRequestAudit = nil
+    env.MS999Loader = nil
+    env.MS999Ticket = nil
+    env.MS999Token = nil
+    env.MS999Secret = nil
+    env.MS999Session = nil
+    env.MS999Script = nil
+    env.MS999LoadTime = nil
+    env.MS999Signal = nil
+    env.MS999Request = nil
+    env.MS999RequestAudit = nil
     env.Key = nil
     _G.Key = nil
-    env.Luasec = nil
-    _G.Luasec = nil
-    Luasec = nil
+    env.MS999 = nil
+    _G.MS999 = nil
+    MS999 = nil
 end
 
 local function KickPlayer(Reason, Code)
-    print("[Luasec] Kick:", tostring(Reason))
+    print("[999MS] Kick:", tostring(Reason))
     if Code == 0 and rawequal(Code, 0) then
         Players.LocalPlayer:Kick(tostring(Reason))
     elseif Code == 1 and rawequal(Code, 1) then
@@ -166,7 +166,7 @@ end
 
 local function TamperKick(code)
     pcall(function()
-        Players.LocalPlayer:Kick("[Luasec] Tamper detected (" .. code .. ")")
+        Players.LocalPlayer:Kick("[999MS] Tamper detected (" .. code .. ")")
     end)
     task.wait(0.3)
     SecureCrash()
@@ -208,10 +208,10 @@ local function GetHWID()
 end
 
 -- ═══ T2-T19 ═══
-if getgenv().Luasec and Luasec and _G.Luasec then return end
-getgenv().Luasec = true
-Luasec = true
-_G.Luasec = true
+if getgenv().MS999 and MS999 and _G.MS999 then return end
+getgenv().MS999 = true
+MS999 = true
+_G.MS999 = true
 
 if RunService:IsStudio() then return TamperKick("T2") end
 
@@ -250,9 +250,9 @@ end
 
 do
     local test = {}
-    getgenv().__luasec_test = test
-    if getgenv().__luasec_test ~= test then return TamperKick("T6") end
-    getgenv().__luasec_test = nil
+    getgenv().__MS999_test = test
+    if getgenv().__MS999_test ~= test then return TamperKick("T6") end
+    getgenv().__MS999_test = nil
 end
 
 local SafeLoadstring = loadstring
@@ -282,7 +282,7 @@ end
 -- Use the request function captured and audited by the loader instead of
 -- resolving a fresh global alias that may have been replaced afterwards.
 do
-    local capturedRequest = SafeGetGenv().LuasecRequest
+    local capturedRequest = SafeGetGenv().MS999Request
     if type(capturedRequest) ~= "function" then
         return TamperKick("HTTP: missing captured request")
     end
@@ -295,7 +295,7 @@ do
     HttpRequest = capturedRequest
 end
 
-print("[Luasec] Payload tamper checks passed")
+print("[999MS] Payload tamper checks passed")
 
 -- ═══ Crypto ═══
 local Charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -456,28 +456,28 @@ local function LoadScript(decrypted, key)
         return KickPlayer("Invalid runtime secret", 0)
     end
 
-    getgenv().LuasecLoader   = true
-    getgenv().LuasecTicket   = Ticket
-    getgenv().LuasecToken    = decrypted.ScriptToken or ""
-    getgenv().LuasecSecret   = RuntimeSecret
-    getgenv().LuasecSession  = decrypted.ServerId or ""
-    getgenv().LuasecScript   = SCRIPT_NAME_LOCKED
-    getgenv().LuasecLoadTime = tick()
+    getgenv().MS999Loader   = true
+    getgenv().MS999Ticket   = Ticket
+    getgenv().MS999Token    = decrypted.ScriptToken or ""
+    getgenv().MS999Secret   = RuntimeSecret
+    getgenv().MS999Session  = decrypted.ServerId or ""
+    getgenv().MS999Script   = SCRIPT_NAME_LOCKED
+    getgenv().MS999LoadTime = tick()
     getgenv().Key            = key
     _G.Key                   = key
 
     ServerId = decrypted.ServerId or ""
 
-    if _G.LUASEC_UI then pcall(function() _G.LUASEC_UI:Destroy() end); _G.LUASEC_UI = nil end
+    if _G.MS999_UI then pcall(function() _G.MS999_UI:Destroy() end); _G.MS999_UI = nil end
 
-    print("[Luasec] Loading main script...")
+    print("[999MS] Loading main script...")
 
     local chunk = SafeLoadstring(decrypted.Body)
     if not chunk then return KickPlayer("Load failed", 0) end
     local ok = pcall(chunk)
     if not ok then return KickPlayer("Run failed", 0) end
 
-    print("[Luasec] Main script loaded")
+    print("[999MS] Main script loaded")
 
     -- The requested lifecycle ends monitoring once the protected script has
     -- launched successfully. This also clears the session and stage-2 state.
@@ -490,7 +490,7 @@ local function FetchAndLoad(key, sname)
     local hwid = GetHWID()
     local userId = tostring(Players.LocalPlayer.UserId)
 
-    print("[Luasec] Verifying key...")
+    print("[999MS] Verifying key...")
 
     local r1, err = postJSON("/api/verify", {
         key = key, hwid = hwid, userId = userId, scriptName = sname,
@@ -508,7 +508,7 @@ local function FetchAndLoad(key, sname)
     Ticket = r1.data.ticket
     XORKey = r1.data.k or ""
 
-    print("[Luasec] Key verified")
+    print("[999MS] Key verified")
 
     local rng = {
         Rng1 = Floor(R1()), Rng2 = Floor(R2()), Rng3 = Floor(R3()),
@@ -558,15 +558,15 @@ end
 
 -- ═══ UI ═══
 local function MakeUI()
-    if _G.LUASEC_UI then pcall(function() _G.LUASEC_UI:Destroy() end) end
+    if _G.MS999_UI then pcall(function() _G.MS999_UI:Destroy() end) end
 
     local gui = Instance.new("ScreenGui")
-    gui.Name = "LuasecUI"
+    gui.Name = "999MSUI"
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     pcall(function() gui.Parent = game:GetService("CoreGui") end)
     if not gui.Parent then gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui") end
-    _G.LUASEC_UI = gui
+    _G.MS999_UI = gui
 
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 340, 0, 300)
@@ -601,7 +601,7 @@ local function MakeUI()
     title.BackgroundTransparency = 1
     title.Font = Enum.Font.GothamBold
     title.TextSize = 20
-    title.Text = "Luasec"
+    title.Text = "999MS"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent = frame
@@ -623,7 +623,7 @@ local function MakeUI()
 
     close.MouseButton1Click:Connect(function()
         gui:Destroy()
-        _G.LUASEC_UI = nil
+        _G.MS999_UI = nil
         StopChecks()
     end)
 
@@ -773,7 +773,7 @@ end
 -- MAIN
 -- ===========================================================
 if USER_KEY == "" then
-    print("[Luasec] No key, opening UI")
+    print("[999MS] No key, opening UI")
     MakeUI()
     return
 end
@@ -781,7 +781,7 @@ end
 task.spawn(function()
     local decrypted, err = FetchAndLoad(USER_KEY, SCRIPT_NAME_LOCKED)
     if not decrypted then
-        print("[Luasec] Auto-load failed:", err)
+        print("[999MS] Auto-load failed:", err)
         MakeUI()
         return
     end
