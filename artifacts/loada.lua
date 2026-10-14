@@ -225,6 +225,7 @@ env.MS999StopChecks = function()
     env.MS999WriteMonitor = nil
     env.MS999HookAudit = nil
     env.MS999PrimitiveCheck = nil
+    env.MS999Request = nil
     env.MS999StopChecks = nil
 end
 
@@ -241,16 +242,20 @@ local requestFn = (syn and syn.request) or (http and http.request) or request or
 if type(requestFn) ~= "function" then
     return Kick("[999MS] HTTP not supported")
 end
+-- Capture one request reference for the rest of this chain. Later stages do
+-- not resolve a fresh global alias that a wrapper could replace mid-run.
+env.MS999Request = requestFn
 
 local ok, response = pcall(requestFn, {
     Url = BASE_URL .. "/loader.lua",
     Method = "GET",
 })
-if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
+if not ok or type(response) ~= "table" or response.StatusCode ~= 200
+    or type(response.Body) ~= "string" then
     return Kick("[999MS] Loader fetch failed")
 end
 
-local chunk = loadstring(response.Body or "")
+local chunk = loadstring(response.Body)
 if type(chunk) ~= "function" then
     return Kick("[999MS] Loader compile failed")
 end

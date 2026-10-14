@@ -223,11 +223,19 @@ local function resolveRequest()
     return nil
 end
 
-local HttpRequest = resolveRequest()
+-- Prefer the request function captured by Stage 2. Fall back only when an
+-- executor cannot expose that reference across loaded chunks.
+local HttpRequest = type(ChainEnv.MS999Request) == "function"
+    and ChainEnv.MS999Request or resolveRequest()
 if type(HttpRequest) ~= "function" then
     return Kick("[999MS] HTTP unavailable")
 end
+softFunctionAudit("request", HttpRequest)
+if HookAudit.request and HookAudit.request.hooked == true then
+    print("[999MS] Hook audit warning: request")
+end
 ChainEnv.MS999Request = HttpRequest
+ChainEnv.MS999RequestAudit = HookAudit.request
 
 local proof = {}
 for _ = 1, 24 do proof[#proof + 1] = string.char(math.random(97, 122)) end
@@ -246,11 +254,12 @@ local ok, response = pcall(HttpRequest, {
     Url = BASE_URL .. "/payload.lua",
     Method = "GET",
 })
-if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
+if not ok or type(response) ~= "table" or response.StatusCode ~= 200
+    or type(response.Body) ~= "string" then
     return Kick("[999MS] Payload fetch failed")
 end
 
-local payloadSrc = response.Body or ""
+local payloadSrc = response.Body
 if #payloadSrc < 100 then
     return Kick("[999MS] Invalid payload")
 end
