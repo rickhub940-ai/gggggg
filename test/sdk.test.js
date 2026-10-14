@@ -163,6 +163,7 @@ async function requestEndpoint(url, headers = {}) {
     'x-client': 'rObLoX',
   });
   const unknownPath = await requestEndpoint('/api/auth?action=trap');
+  const robloxUnknownPath = await requestEndpoint('/api/auth?action=trap', { 'X-Roblox': 'CLIENT' });
   assert.equal(executorArtifact.statusCode, 200);
   assert.match(executorArtifact.body, /api\/bootstrap/);
   assert.equal(robloxArtifact.statusCode, 200);
@@ -171,6 +172,8 @@ async function requestEndpoint(url, headers = {}) {
   assert.equal(browserArtifact.headers.Location, 'https://yura.lol/09ms');
   assert.equal(unknownPath.statusCode, 302);
   assert.equal(unknownPath.headers.Location, 'https://yura.lol/09ms');
+  assert.equal(robloxUnknownPath.statusCode, 404);
+  assert.equal(robloxUnknownPath.headers.Location, undefined);
   console.log('PASS 999MS Server SDK, randomized ticket, bootstrap, and browser trap tests');
 })().catch((error) => {
   console.error(error);

@@ -61,6 +61,16 @@ function trapRedirect(res) {
   return res.status(302).send('');
 }
 
+// Roblox-marked requests never receive the browser redirect. Invalid paths or
+// methods still fail closed, but with a normal empty HTTP error instead.
+function rejectOrTrap(req, res, status = 404) {
+  if (hasRobloxHeader(req)) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(status).send('');
+  }
+  return trapRedirect(res);
+}
+
 // ═══ Request classification ═══
 // Roblox executor/game requests are allowed through the browser-trap gate when
 // any header name or value contains "roblox", regardless of letter casing.
@@ -114,18 +124,20 @@ module.exports = async function handler(req, res) {
   // Browser requests are trapped, while executor HTTP requests receive the
   // raw stage artifact required by the ordered loader chain.
   if (action === 'artifact') {
-    if (req.method !== 'GET' || isBrowserRequest(req)) return trapRedirect(res);
+    if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
+    if (isBrowserRequest(req)) return trapRedirect(res);
     const name = req.query?.name || url.searchParams.get('name');
-    return serveArtifact(res, name);
+    return serveArtifact(req, res, name);
   }
 
-  if (action === 'trap') return trapRedirect(res);
+  if (action === 'trap') return rejectOrTrap(req, res);
 
   // ═══ BOOTSTRAP MARK (GET) ═══
   // This creates a fresh server-random chain identifier for Stage 1. It is
   // not an authorization ticket; key authorization remains /api/verify.
   if (action === 'bootstrap') {
-    if (req.method !== 'GET' || isBrowserRequest(req)) return trapRedirect(res);
+    if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
+    if (isBrowserRequest(req)) return trapRedirect(res);
     const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
                req.socket?.remoteAddress || '';
     if (!checkRateLimit(ip)) return res.status(429).json({ error: 'Rate limited' });
@@ -135,14 +147,14 @@ module.exports = async function handler(req, res) {
   }
 
   // ═══ อื่นๆ: ต้อง POST ═══
-  if (req.method !== 'POST') return trapRedirect(res);
+  if (req.method !== 'POST') return rejectOrTrap(req, res, 405);
   if (isBrowserRequest(req)) return trapRedirect(res);
 
   const ct = req.headers['content-type'] || '';
-  if (!ct.includes('application/json')) return trapRedirect(res);
+  if (!ct.includes('application/json')) return rejectOrTrap(req, res, 415);
 
   const validActions = ['verify', 'script', 'script-verify', 'heartbeat', 'start', 'admin-ban'];
-  if (!action || !validActions.includes(action)) return trapRedirect(res);
+  if (!action || !validActions.includes(action)) return rejectOrTrap(req, res);
 
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -171,9 +183,9 @@ module.exports = async function handler(req, res) {
   }
 };
 
-function serveArtifact(res, name) {
+function serveArtifact(req, res, name) {
   const filename = PUBLIC_ARTIFACTS[name];
-  if (!filename) return trapRedirect(res);
+  if (!filename) return rejectOrTrap(req, res);
   try {
     const body = fs.readFileSync(path.join(process.cwd(), 'artifacts', filename), 'utf8');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
