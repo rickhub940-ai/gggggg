@@ -53,6 +53,8 @@ const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'loade
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
 assert.match(loadcSource, /Stage = "stage1"/);
+assert.match(loadcSource, /environment\.MS999Chain = nil\n    return/);
+assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick|\berror\(/);
 assert.match(stageTwoSource, /chainIs\("stage1", CHAIN_TTL\)/);
 assert.match(stageTwoSource, /chain\.Stage = "stage2"/);
 assert.match(loaderSource, /chainIs\("stage2", CHAIN_TTL\)/);
