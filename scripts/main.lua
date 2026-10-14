@@ -3,6 +3,21 @@
 --// ═══════════════════════════════════════════════════════════
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
+local ExpectedScript = "${SCRIPTID}"
+local CHAIN_VERSION = "999MS-chain-v1"
+
+local ChainEnv = getgenv()
+local Chain = ChainEnv.MS999Chain
+if type(Chain) ~= "table"
+    or Chain.Version ~= CHAIN_VERSION
+    or type(Chain.Id) ~= "string"
+    or Chain.Stage ~= "script"
+    or Chain.Script ~= ExpectedScript
+    or type(Chain.UpdatedAt) ~= "number"
+    or tick() - Chain.UpdatedAt < 0
+    or tick() - Chain.UpdatedAt > 20 then
+    return Players.LocalPlayer:Kick("[999MS] Chain rejected: run loadc.lua")
+end
 
 if not getgenv().MS999Loader then
     return Players.LocalPlayer:Kick("[999MS] Must run via loader")
@@ -12,7 +27,6 @@ local RuntimeSecret = getgenv().MS999Secret
 local Ticket = getgenv().MS999Ticket
 local ScriptToken = getgenv().MS999Token
 local MS999Script = getgenv().MS999Script
-local ExpectedScript = "${SCRIPTID}"
 
 if type(RuntimeSecret) ~= "string" or #RuntimeSecret ~= 64 then
     return Players.LocalPlayer:Kick("[999MS] Missing runtime secret")
@@ -69,6 +83,11 @@ local decoded
 pcall(function() decoded = HttpService:JSONDecode(res.Body) end)
 if not decoded or decoded.valid ~= true then
     return Players.LocalPlayer:Kick("[999MS] " .. ((decoded and decoded.reason) or "Unauthorized"))
+end
+
+-- The one-time runtime proof succeeded; consume the client chain mark.
+if ChainEnv.MS999Chain == Chain then
+    ChainEnv.MS999Chain = nil
 end
 
 --// ═══════════════════════════════════════════════════════════

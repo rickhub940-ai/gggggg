@@ -6,6 +6,28 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
 local BASE_URL = "https://keysytemdemo.vercel.app"
+local CHAIN_VERSION = "999MS-chain-v1"
+local CHAIN_TTL = 20
+
+local ChainEnv = getgenv()
+local Chain = ChainEnv.MS999Chain
+local ChainId = type(Chain) == "table" and Chain.Id or nil
+local function chainIs(stage, maxAge)
+    local current = ChainEnv.MS999Chain
+    return current == Chain
+        and type(current) == "table"
+        and current.Version == CHAIN_VERSION
+        and type(current.Id) == "string"
+        and current.Id == ChainId
+        and current.Stage == stage
+        and type(current.UpdatedAt) == "number"
+        and tick() - current.UpdatedAt >= 0
+        and tick() - current.UpdatedAt <= maxAge
+end
+
+if not chainIs("stage2", CHAIN_TTL) then
+    return Players.LocalPlayer:Kick("[999MS] Chain rejected: run loadc.lua")
+end
 
 -- ═══ T0: require getgenv().script ═══
 local userScript = getgenv().script or _G.script
@@ -485,6 +507,12 @@ do
         return Players.LocalPlayer:Kick("[999MS] T-RAWSET4: " .. reason)
     end
 end
+
+if not chainIs("stage2", 45) then
+    return Players.LocalPlayer:Kick("[999MS] Chain interrupted before payload")
+end
+Chain.Stage = "loader"
+Chain.UpdatedAt = tick()
 
 print("[999MS] Anti-checks passed")
 

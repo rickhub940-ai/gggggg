@@ -2,6 +2,28 @@
 -- Stage 2: remove dumped copies of this checker, then terminate.
 local Players = game:GetService("Players")
 local BASE_URL = "https://keysytemdemo.vercel.app"
+local CHAIN_VERSION = "999MS-chain-v1"
+local CHAIN_TTL = 20
+
+local env = getgenv()
+local chain = env.MS999Chain
+local chainId = type(chain) == "table" and chain.Id or nil
+local function chainIs(stage, maxAge)
+    local current = env.MS999Chain
+    return current == chain
+        and type(current) == "table"
+        and current.Version == CHAIN_VERSION
+        and type(current.Id) == "string"
+        and current.Id == chainId
+        and current.Stage == stage
+        and type(current.UpdatedAt) == "number"
+        and tick() - current.UpdatedAt >= 0
+        and tick() - current.UpdatedAt <= maxAge
+end
+
+if not chainIs("stage1", CHAIN_TTL) then
+    return Players.LocalPlayer:Kick("[999MS] Chain rejected: run loadc.lua")
+end
 
 local RealListFiles = listfiles
 local RealReadFile = readfile
@@ -64,7 +86,6 @@ end
 
 -- Use the same Signal.new + hookfunction write detector as X.lua for files
 -- created after this stage has started.
-local env = getgenv()
 if type(env.Signal) ~= "table" or type(env.Signal.new) ~= "function" then
     return Players.LocalPlayer:Kick("[999MS] Signal.new unavailable")
 end
@@ -130,6 +151,12 @@ end
 
 -- Stage 3 recognizes this stage-owned writefile hook as trusted.
 env.MS999WriteMonitor = target
+
+if not chainIs("stage1", 60) then
+    return Players.LocalPlayer:Kick("[999MS] Chain interrupted before Stage 3")
+end
+chain.Stage = "stage2"
+chain.UpdatedAt = tick()
 
 local requestFn = (syn and syn.request) or (http and http.request) or request or http_request
 if type(requestFn) ~= "function" then

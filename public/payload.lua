@@ -6,6 +6,29 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local BASE_URL = "https://keysytemdemo.vercel.app"
+local CHAIN_VERSION = "999MS-chain-v1"
+local CHAIN_TTL = 20
+local CHAIN_SESSION_TTL = 30 * 60
+
+local ChainEnv = getgenv()
+local Chain = ChainEnv.MS999Chain
+local ChainId = type(Chain) == "table" and Chain.Id or nil
+local function chainIs(stage, maxAge)
+    local current = ChainEnv.MS999Chain
+    return current == Chain
+        and type(current) == "table"
+        and current.Version == CHAIN_VERSION
+        and type(current.Id) == "string"
+        and current.Id == ChainId
+        and current.Stage == stage
+        and type(current.UpdatedAt) == "number"
+        and tick() - current.UpdatedAt >= 0
+        and tick() - current.UpdatedAt <= maxAge
+end
+
+if not chainIs("loader", CHAIN_TTL) then
+    return Players.LocalPlayer:Kick("[999MS] Chain rejected: run loadc.lua")
+end
 
 -- ═══ L1-L3: Loader Proof ═══
 local LoaderProof = getgenv().MS999LoaderProof
@@ -24,6 +47,11 @@ end
 if type(LoaderMarker) ~= "string" or not LoaderMarker:match("^LSE_%d+$") then
     return Players.LocalPlayer:Kick("[999MS] L3: Invalid marker")
 end
+if not chainIs("loader", CHAIN_TTL) then
+    return Players.LocalPlayer:Kick("[999MS] Chain interrupted before payload")
+end
+Chain.Stage = "payload"
+Chain.UpdatedAt = tick()
 
 -- ═══ Signal bus ═══
 local MS999Signal = getgenv().MS999Signal
@@ -129,6 +157,9 @@ local function StopChecks()
     XORKey = ""
 
     local env = getgenv()
+    if env.MS999Chain == Chain and type(Chain) == "table" and Chain.Id == ChainId then
+        env.MS999Chain = nil
+    end
     local stopStageTwo = env.MS999StopChecks
     if type(stopStageTwo) == "function" then
         pcall(stopStageTwo)
@@ -455,6 +486,13 @@ end
 -- ═══ Load & Run ═══
 local function LoadScript(decrypted, key)
     if not ChecksActive then return end
+    if not chainIs("payload", CHAIN_SESSION_TTL) then
+        return KickPlayer("[999MS] Chain expired before script", 0)
+    end
+    Chain.Stage = "script"
+    Chain.Script = SCRIPT_NAME_LOCKED
+    Chain.UpdatedAt = tick()
+
     local RuntimeSecret = decrypted.RuntimeSecret or ""
     if type(RuntimeSecret) ~= "string" or #RuntimeSecret ~= 64 then
         return KickPlayer("Invalid runtime secret", 0)
@@ -490,6 +528,10 @@ end
 
 local function FetchAndLoad(key, sname)
     if not ChecksActive then return nil, "Cancelled" end
+    if not chainIs("payload", CHAIN_SESSION_TTL) then
+        KickPlayer("[999MS] Chain expired", 0)
+        return nil, "Chain expired"
+    end
     local authScope = 0
     local hwid = GetHWID()
     local userId = tostring(Players.LocalPlayer.UserId)

@@ -47,8 +47,20 @@ const offsets = payloadSource.match(/local ChallengeOffsets = \{ ([^}]+) \}/)[1]
   .split(',').map((value) => Number(value.trim()));
 assert.deepEqual(multipliers.map((value, index) => [value, offsets[index]]), expectedTransforms);
 
+const loadcSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'loadc.lua'), 'utf8');
+const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'savecheck.lua'), 'utf8');
 const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'loader.lua'), 'utf8');
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'payload.lua'), 'utf8');
+const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
+assert.match(loadcSource, /Stage = "stage1"/);
+assert.match(stageTwoSource, /chainIs\("stage1", CHAIN_TTL\)/);
+assert.match(stageTwoSource, /chain\.Stage = "stage2"/);
+assert.match(loaderSource, /chainIs\("stage2", CHAIN_TTL\)/);
+assert.match(loaderSource, /Chain\.Stage = "loader"/);
+assert.match(payloadLuaSource, /chainIs\("loader", CHAIN_TTL\)/);
+assert.match(payloadLuaSource, /Chain\.Stage = "payload"/);
+assert.match(payloadLuaSource, /Chain\.Stage = "script"/);
+assert.match(mainSource, /Chain\.Stage ~= "script"/);
 assert.match(loaderSource, /local Stage2WriteMonitor = getgenv\(\)\.MS999WriteMonitor/);
 assert.match(loaderSource, /RealWriteFile = type\(Stage2WriteMonitor\) == "function" and Stage2WriteMonitor/);
 assert.match(payloadLuaSource, /local Stage2WriteMonitor = getgenv\(\)\.MS999WriteMonitor/);
