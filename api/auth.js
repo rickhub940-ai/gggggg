@@ -252,6 +252,9 @@ function renderLoadcArtifact() {
 async function handleVerify(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
   const { key, hwid, userId, scriptName } = req.body || {};
+  // First request challenge: reject a simple forged `{ valid: true }` response
+  // before issuing a signed ticket. The provider still owns key/device binding.
+  const clientChallenge = validateClientChallenge(req.body);
 
   if (typeof key !== 'string' || !key.trim())
     return res.status(400).json({ valid: false, error: 'key required' });
@@ -261,6 +264,8 @@ async function handleVerify(req, res, ip) {
     return res.status(400).json({ valid: false, error: 'scriptName required' });
   if (!isValidScriptName(scriptName))
     return res.status(400).json({ valid: false, error: 'invalid scriptName format' });
+  if (!clientChallenge.ok)
+    return res.status(400).json({ valid: false, error: clientChallenge.reason });
 
   const reason = checkRevoked({ hwid, userId, ip });
   if (reason)
@@ -281,7 +286,12 @@ async function handleVerify(req, res, ip) {
     scriptName,
   });
 
-  return res.status(200).json({ valid: true, ticket, k: xorKey });
+  return res.status(200).json({
+    valid: true,
+    ticket,
+    k: xorKey,
+    check: createChallengeResponse(clientChallenge.values),
+  });
 }
 
 // ═══ /api/script ═══

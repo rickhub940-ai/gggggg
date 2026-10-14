@@ -27,6 +27,8 @@ const validated = validateClientChallenge(clientChallenge);
 assert.equal(validated.ok, true);
 assert.deepEqual(validated.values, values);
 assert.equal(validateClientChallenge({ ...clientChallenge, RngFloat: 44 }).ok, false);
+assert.equal(validateClientChallenge({ ...clientChallenge, RngFloat: 1 }).ok, false);
+assert.equal(validateClientChallenge({ ...clientChallenge, RngFloat: 1000001.5 }).ok, false);
 assert.equal(validateClientChallenge({ ...clientChallenge, Rng3: 1.25 }).ok, false);
 
 const encodedChallenge = createChallengeResponse(values).split('|').map(Number);
@@ -77,6 +79,11 @@ assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
 assert.match(authSource, /crypto\.randomBytes\(26\)\.toString\('hex'\)/);
 assert.match(authSource, /function createLoadaPathCapability\(\)/);
 assert.match(authSource, /const LOADA_PATH_TTL = 20 \* 1000/);
+assert.match(authSource, /const clientChallenge = validateClientChallenge\(req\.body\)/);
+assert.match(authSource, /check: createChallengeResponse\(clientChallenge\.values\)/);
+assert.match(payloadLuaSource, /local rng = MakeRngChallenge\(\)/);
+assert.match(payloadLuaSource, /if not VerifyRngChallenge\(r1\.data\.check, rng\) then/);
+assert.match(payloadLuaSource, /if not VerifyRngChallenge\(decrypted\.check, rng\) then/);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap'), false);
 for (const name of ['loadc', 'loader', 'sdk']) {
   assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);

@@ -387,6 +387,27 @@ local function R5()
     return Equate(((r9 ~= 0) and (m * r9) or m) + E6() + r10)
 end
 
+local function MakeRngChallenge()
+    return {
+        Rng1 = Floor(R1()), Rng2 = Floor(R2()), Rng3 = Floor(R3()),
+        Rng4 = Floor(R4()), Rng5 = Floor(R5()),
+        -- Server requires a bounded, finite non-integer to catch simple RNG hooks.
+        RngFloat = math.random(1, 1000000) + math.random(),
+    }
+end
+
+local function VerifyRngChallenge(check, rng)
+    if type(check) ~= "string" then return false end
+    local parts = Split(check, "|")
+    if #parts ~= 5 then return false end
+    local originals = { rng.Rng1, rng.Rng2, rng.Rng3, rng.Rng4, rng.Rng5 }
+    for index = 1, 5 do
+        local restored = RestoreChallenge(index, tonumber(parts[index]))
+        if restored == nil or not SecureEQ(restored, originals[index]) then return false end
+    end
+    return true
+end
+
 -- ═══ POST ═══
 local function postJSON(path, payload)
     local ok, res = pcall(HttpRequest, {
@@ -469,11 +490,17 @@ local function FetchAndLoad(key, sname)
     local authScope = 0
     local hwid = GetHWID()
     local userId = tostring(Players.LocalPlayer.UserId)
+    -- Generate the challenge before the first authorization request. This
+    -- makes a forged static `{ valid = true }` response fail before its ticket
+    -- is trusted, while the provider remains the key/device authority.
+    local rng = MakeRngChallenge()
 
     print("[999MS] Verifying key...")
 
     local r1, err = postJSON("/api/verify", {
         key = key, hwid = hwid, userId = userId, scriptName = sname,
+        Rng1 = rng.Rng1, Rng2 = rng.Rng2, Rng3 = rng.Rng3,
+        Rng4 = rng.Rng4, Rng5 = rng.Rng5, RngFloat = rng.RngFloat,
     })
 
     if not r1 then return nil, err or "Connection failed" end
@@ -483,19 +510,20 @@ local function FetchAndLoad(key, sname)
         return nil, r1.data.message or r1.data.error or "Invalid key"
     end
     authScope = authScope + 1
+    if not VerifyRngChallenge(r1.data.check, rng) then
+        return nil, "Verification challenge failed"
+    end
+    authScope = authScope + 1
     if not ChecksActive then return nil, "Cancelled" end
 
     Ticket = r1.data.ticket
     XORKey = r1.data.k or ""
+    if type(Ticket) ~= "string" or type(XORKey) ~= "string" or XORKey == "" then
+        return nil, "Invalid verification response"
+    end
 
     print("[999MS] Key verified")
 
-    local rng = {
-        Rng1 = Floor(R1()), Rng2 = Floor(R2()), Rng3 = Floor(R3()),
-        Rng4 = Floor(R4()), Rng5 = Floor(R5()),
-        -- Kept as a non-integer for the server-side challenge sanity check.
-        RngFloat = math.random(1, 1000000) + math.random(),
-    }
     local body = EncodeBody(rng)
     body.ticket = Ticket
     body.scriptName = sname
@@ -517,18 +545,8 @@ local function FetchAndLoad(key, sname)
 
     if not okDec or type(decrypted) ~= "table" then return nil, "Decode failed" end
     if decrypted.Valid ~= true then return nil, decrypted.reason or "Server rejected" end
-    authScope = authScope + 1
-
-    if type(decrypted.check) ~= "string" then return nil, "RNG challenge missing" end
-    local parts = Split(decrypted.check, "|")
-    if #parts ~= 5 then return nil, "RNG challenge malformed" end
-
-    local rngOriginals = { rng.Rng1, rng.Rng2, rng.Rng3, rng.Rng4, rng.Rng5 }
-    for index = 1, 5 do
-        local restored = RestoreChallenge(index, tonumber(parts[index]))
-        if restored == nil or not SecureEQ(restored, rngOriginals[index]) then
-            return nil, "RNG check failed"
-        end
+    if not VerifyRngChallenge(decrypted.check, rng) then
+        return nil, "Script challenge failed"
     end
 
     authScope = authScope + 1
