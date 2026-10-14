@@ -145,18 +145,35 @@ if removeMarkedFiles() then
     return Kick("[999MS] Source save detected")
 end
 
--- Install one focused hookfunction monitor for source writes. This is a
--- functional capability check: it verifies that the hook can be installed and
--- returns an original callable. It deliberately avoids stack inspection,
--- debug.getinfo, and isfunctionhooked because those can be changed by an
--- obfuscator without indicating malicious behavior.
+-- Install one focused hookfunction monitor for source writes. Hook/C-closure
+-- signals are collected as diagnostics only: a VM obfuscator may legitimately
+-- alter them. The enforceable check is whether hookfunction successfully
+-- installs this monitor and returns the original callable.
 local SafeHookFunction = hookfunction
 local SafeNewCClosure = newcclosure
+local SafeDebugGetInfo = type(debug) == "table" and debug.getinfo or nil
+local SafeIsHooked = isfunctionhooked
 if type(env.Signal) ~= "table" or type(env.Signal.new) ~= "function"
     or type(env.writefile) ~= "function" or type(SafeHookFunction) ~= "function"
     or type(SafeNewCClosure) ~= "function" then
     return Kick("[999MS] Write monitor unavailable")
 end
+
+local function softHookAudit(label, fn)
+    local audit = { label = label, cClosure = nil, hooked = nil }
+    if type(SafeDebugGetInfo) == "function" then
+        local ok, info = pcall(SafeDebugGetInfo, fn)
+        if ok and type(info) == "table" then audit.cClosure = info.what == "C" end
+    end
+    if type(SafeIsHooked) == "function" then
+        local ok, hooked = pcall(SafeIsHooked, fn)
+        if ok and type(hooked) == "boolean" then audit.hooked = hooked end
+    end
+    return audit
+end
+
+local HookAudit = { hookfunction = softHookAudit("hookfunction", SafeHookFunction) }
+env.MS999HookAudit = HookAudit
 
 local saved = env.Signal.new()
 local target = env.writefile
@@ -183,6 +200,8 @@ if not installed or type(original) ~= "function" then
     return Kick("[999MS] Write monitor unavailable")
 end
 oldWrite = original
+HookAudit.writefile = softHookAudit("writefile", target)
+HookAudit.writeMonitorInstalled = true
 
 saveConnection = saved:Connect(function(event)
     if env.MS999ChecksActive == false then return end
@@ -204,6 +223,7 @@ env.MS999StopChecks = function()
         pcall(function() saveConnection:Disconnect() end)
     end
     env.MS999WriteMonitor = nil
+    env.MS999HookAudit = nil
     env.MS999StopChecks = nil
 end
 

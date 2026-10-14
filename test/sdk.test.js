@@ -57,7 +57,7 @@ const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'verc
 const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8');
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-assert.equal(loadaSha, 'd1ba29904dc158a7db7d58714b0b87f992599762e8aacd98027a6a5ce718b1bb');
+assert.equal(loadaSha, 'a2a210c6e3d3f5cbac699169f5ce03441518b7b1d2c7a1e9c776e5c149cb6a64');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /local d="__LOADA_D__"/);
 assert.match(loadcSource, /local n="__LOADA_N__"/);
@@ -94,17 +94,19 @@ assert.match(payloadLuaSource, /chainIs\("loader", CHAIN_TTL\)/);
 assert.match(payloadLuaSource, /Chain\.Stage = "payload"/);
 assert.match(payloadLuaSource, /Chain\.Stage = "script"/);
 assert.match(mainSource, /Chain\.Stage ~= "script"/);
-// Hook protection is intentionally capability-based: Stage 2 installs the
-// sole writefile monitor, while downstream stages only require that monitor to
-// remain present/active. Do not reintroduce stack, C-closure, or hook-scanner
-// checks here; obfuscators can alter those properties legitimately.
+// Hook protection is capability-based. Stage 2 performs the only actual
+// hookfunction operation. C-closure/isfunctionhooked values are retained only
+// as soft diagnostics because VM obfuscators may legitimately change them.
 assert.match(stageTwoSource, /local SafeHookFunction = hookfunction/);
+assert.match(stageTwoSource, /local SafeIsHooked = isfunctionhooked/);
+assert.match(stageTwoSource, /local function softHookAudit\(label, fn\)/);
 assert.match(stageTwoSource, /pcall\(SafeHookFunction, target, SafeNewCClosure/);
+assert.match(stageTwoSource, /HookAudit\.writeMonitorInstalled = true/);
 assert.match(loaderSource, /local Stage2WriteMonitor = ChainEnv\.MS999WriteMonitor/);
-assert.match(loaderSource, /ChainEnv\.MS999ChecksActive == false/);
+assert.match(loaderSource, /HookAudit\.writeMonitorInstalled ~= true/);
 assert.match(payloadLuaSource, /local Stage2WriteMonitor = ChainEnv\.MS999WriteMonitor/);
-assert.match(payloadLuaSource, /ChainEnv\.MS999ChecksActive == false/);
-for (const source of [stageTwoSource, loaderSource, payloadLuaSource]) {
+assert.match(payloadLuaSource, /HookAudit\.writeMonitorInstalled ~= true/);
+for (const source of [loaderSource, payloadLuaSource]) {
   assert.doesNotMatch(source, /\bisfunctionhooked\s*\(/);
   assert.doesNotMatch(source, /\bdebug\.getinfo\s*\(/);
 }

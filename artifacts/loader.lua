@@ -139,8 +139,15 @@ end)
 -- call stack, debug metadata, or isfunctionhooked: those are not portable
 -- across executors and are changed by many obfuscators.
 local Stage2WriteMonitor = ChainEnv.MS999WriteMonitor
-if type(Stage2WriteMonitor) ~= "function" or ChainEnv.MS999ChecksActive == false then
+local HookAudit = ChainEnv.MS999HookAudit
+if type(Stage2WriteMonitor) ~= "function" or ChainEnv.MS999ChecksActive == false
+    or type(HookAudit) ~= "table" or HookAudit.writeMonitorInstalled ~= true then
     return Kick("[999MS] Write monitor unavailable")
+end
+-- C-closure / isfunctionhooked values are advisory only. Their shape can be
+-- changed by an obfuscator, so they are never a stand-alone Kick condition.
+if HookAudit.hookfunction and HookAudit.hookfunction.hooked == true then
+    print("[999MS] Hook audit warning: hookfunction")
 end
 
 local SafeLoadstring = loadstring

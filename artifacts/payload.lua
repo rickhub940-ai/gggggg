@@ -123,7 +123,9 @@ end
 -- verify that this monitor is present and active; we intentionally do not
 -- inspect debug metadata, native closure type, stack shape, or isfunctionhooked.
 local Stage2WriteMonitor = ChainEnv.MS999WriteMonitor
-if type(Stage2WriteMonitor) ~= "function" or ChainEnv.MS999ChecksActive == false then
+local HookAudit = ChainEnv.MS999HookAudit
+if type(Stage2WriteMonitor) ~= "function" or ChainEnv.MS999ChecksActive == false
+    or type(HookAudit) ~= "table" or HookAudit.writeMonitorInstalled ~= true then
     return Kick("[999MS] Write monitor unavailable")
 end
 
@@ -174,6 +176,7 @@ local function StopChecks()
     else
         env.MS999ChecksActive = false
         env.MS999WriteMonitor = nil
+        env.MS999HookAudit = nil
     end
 
     env.MS999Loader = nil
