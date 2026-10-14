@@ -150,6 +150,52 @@ if HookAudit.hookfunction and HookAudit.hookfunction.hooked == true then
     print("[999MS] Hook audit warning: hookfunction")
 end
 
+-- Keep the rawset/rawget/math.random checks, but make them functional and
+-- stack-tolerant. C-closure and isfunctionhooked results are advisory only;
+-- an obfuscator may change either without changing actual behavior.
+local function softFunctionAudit(label, fn)
+    local audit = { label = label, cClosure = nil, hooked = nil }
+    local debugInfo = type(debug) == "table" and debug.getinfo or nil
+    if type(debugInfo) == "function" then
+        local ok, info = pcall(debugInfo, fn)
+        if ok and type(info) == "table" then audit.cClosure = info.what == "C" end
+    end
+    if type(isfunctionhooked) == "function" then
+        local ok, hooked = pcall(isfunctionhooked, fn)
+        if ok and type(hooked) == "boolean" then audit.hooked = hooked end
+    end
+    HookAudit[label] = audit
+end
+
+local SafeRawset = rawset
+local SafeRawget = rawget
+local SafeRandom = type(math) == "table" and math.random or nil
+softFunctionAudit("rawset", SafeRawset)
+softFunctionAudit("rawget", SafeRawget)
+softFunctionAudit("math.random", SafeRandom)
+
+if type(SafeRawset) ~= "function" or type(SafeRawget) ~= "function" then
+    return Kick("[999MS] Raw table primitives unavailable")
+end
+local rawProbe, rawMarker = {}, {}
+local rawOk, rawWorks = pcall(function()
+    SafeRawset(rawProbe, "__999MS_probe", rawMarker)
+    return SafeRawget(rawProbe, "__999MS_probe") == rawMarker
+end)
+if not rawOk or rawWorks ~= true then
+    return Kick("[999MS] Raw table primitives unavailable")
+end
+
+if type(SafeRandom) ~= "function" then
+    return Kick("[999MS] Random unavailable")
+end
+local randomOk, randomValue = pcall(SafeRandom, 1, 1000000)
+if not randomOk or type(randomValue) ~= "number" or randomValue % 1 ~= 0
+    or randomValue < 1 or randomValue > 1000000 then
+    return Kick("[999MS] Random unavailable")
+end
+ChainEnv.MS999PrimitiveCheck = { rawTable = true, random = true }
+
 local SafeLoadstring = loadstring
 if type(SafeLoadstring) ~= "function" then
     return Kick("[999MS] loadstring unavailable")

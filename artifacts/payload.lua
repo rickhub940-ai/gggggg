@@ -128,6 +128,11 @@ if type(Stage2WriteMonitor) ~= "function" or ChainEnv.MS999ChecksActive == false
     or type(HookAudit) ~= "table" or HookAudit.writeMonitorInstalled ~= true then
     return Kick("[999MS] Write monitor unavailable")
 end
+local PrimitiveCheck = ChainEnv.MS999PrimitiveCheck
+if type(PrimitiveCheck) ~= "table" or PrimitiveCheck.rawTable ~= true
+    or PrimitiveCheck.random ~= true then
+    return Kick("[999MS] Runtime primitives unavailable")
+end
 
 -- ===========================================================
 -- Anti-Save
@@ -189,6 +194,7 @@ local function StopChecks()
     env.MS999Signal = nil
     env.MS999Request = nil
     env.MS999RequestAudit = nil
+    env.MS999PrimitiveCheck = nil
     env.Key = nil
     _G.Key = nil
     env.MS999 = nil

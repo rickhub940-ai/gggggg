@@ -57,7 +57,7 @@ const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'verc
 const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8');
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-assert.equal(loadaSha, 'a2a210c6e3d3f5cbac699169f5ce03441518b7b1d2c7a1e9c776e5c149cb6a64');
+assert.equal(loadaSha, 'b13670d75bc1f1d3bfed7e5f95b95ed9e70e2ab459bf40642c0f7e81e2a82b60');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /local d="__LOADA_D__"/);
 assert.match(loadcSource, /local n="__LOADA_N__"/);
@@ -104,8 +104,16 @@ assert.match(stageTwoSource, /pcall\(SafeHookFunction, target, SafeNewCClosure/)
 assert.match(stageTwoSource, /HookAudit\.writeMonitorInstalled = true/);
 assert.match(loaderSource, /local Stage2WriteMonitor = ChainEnv\.MS999WriteMonitor/);
 assert.match(loaderSource, /HookAudit\.writeMonitorInstalled ~= true/);
+assert.match(loaderSource, /local SafeRawset = rawset/);
+assert.match(loaderSource, /local SafeRawget = rawget/);
+assert.match(loaderSource, /softFunctionAudit\("math\.random", SafeRandom\)/);
+assert.match(loaderSource, /SafeRawget\(rawProbe, "__999MS_probe"\) == rawMarker/);
+assert.match(loaderSource, /pcall\(SafeRandom, 1, 1000000\)/);
+assert.match(loaderSource, /ChainEnv\.MS999PrimitiveCheck = \{ rawTable = true, random = true \}/);
 assert.match(payloadLuaSource, /local Stage2WriteMonitor = ChainEnv\.MS999WriteMonitor/);
 assert.match(payloadLuaSource, /HookAudit\.writeMonitorInstalled ~= true/);
+assert.match(payloadLuaSource, /PrimitiveCheck\.rawTable ~= true/);
+assert.match(payloadLuaSource, /PrimitiveCheck\.random ~= true/);
 for (const source of [loaderSource, payloadLuaSource]) {
   assert.doesNotMatch(source, /\bisfunctionhooked\s*\(/);
   assert.doesNotMatch(source, /\bdebug\.getinfo\s*\(/);

@@ -224,6 +224,7 @@ env.MS999StopChecks = function()
     end
     env.MS999WriteMonitor = nil
     env.MS999HookAudit = nil
+    env.MS999PrimitiveCheck = nil
     env.MS999StopChecks = nil
 end
 
