@@ -1,10 +1,17 @@
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const { verifyKey, createLink } = require('../lib/platoboost');
 const { issueTicket, verifyTicket, hashHwid } = require('../lib/ticket');
-const { xorCipher, b64encode, b64decode } = require('../lib/crypto');
+const {
+  createChallengeResponse,
+  validateClientChallenge,
+  isValidScriptName,
+  encodeProtectedPayload,
+  decodeProtectedPayload,
+  createRuntimeCredentials,
+  verifyRuntimeProof,
+} = require('../lib/luasec-server-sdk');
 const {
   revokeHwid, revokeUser, revokeIp, checkRevoked, stats,
 } = require('../lib/revoke');
@@ -12,16 +19,6 @@ const {
 const sessions = new Map();
 const SESSION_TTL = 30 * 60 * 1000;
 const RUNTIME_TTL = 60 * 1000;
-
-// Per-component reversible transforms used for the client challenge response.
-// Their inverses live on the client; none of these are an authorization secret.
-const RNG_CHALLENGE = Object.freeze([
-  { multiplier: 2, offset: -32 },
-  { multiplier: 5, offset: 256 },
-  { multiplier: 3, offset: -17 },
-  { multiplier: 7, offset: 19 },
-  { multiplier: 11, offset: -101 },
-]);
 
 // ═══ Rate limit ═══
 const rateLimit = new Map();
@@ -131,28 +128,6 @@ module.exports = async function handler(req, res) {
   }
 };
 
-// ═══ Codec ═══
-function decodePayload(body, xorKey) {
-  try {
-    const { Data } = body || {};
-    if (!Array.isArray(Data)) return { ok: false };
-    const raw = Buffer.from(Data).toString('utf8');
-    if (raw.length < xorKey.length + 4) return { ok: false };
-    if (raw.slice(0, xorKey.length) !== xorKey) return { ok: false };
-    const b64 = raw.slice(xorKey.length);
-    const decrypted = xorCipher(b64decode(b64), xorKey).toString('utf8');
-    return { ok: true, data: JSON.parse(decrypted) };
-  } catch { return { ok: false }; }
-}
-
-function encodePayload(data, xorKey) {
-  const encrypted = xorCipher(Buffer.from(JSON.stringify(data), 'utf8'), xorKey);
-  const full = xorKey + b64encode(encrypted);
-  const bytes = [];
-  for (let i = 0; i < full.length; i++) bytes.push(full.charCodeAt(i));
-  return { Data: bytes };
-}
-
 // ═══ /api/verify ═══
 async function handleVerify(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
@@ -164,7 +139,7 @@ async function handleVerify(req, res, ip) {
     return res.status(400).json({ valid: false, error: 'invalid hwid format' });
   if (typeof scriptName !== 'string' || scriptName.length < 1 || scriptName.length > 64)
     return res.status(400).json({ valid: false, error: 'scriptName required' });
-  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(scriptName))
+  if (!isValidScriptName(scriptName))
     return res.status(400).json({ valid: false, error: 'invalid scriptName format' });
 
   const reason = checkRevoked({ hwid, userId, ip });
@@ -214,30 +189,25 @@ async function handleScript(req, res, ip) {
   if (name !== payload.scriptName)
     return res.status(403).json({ Valid: false, reason: 'scriptName mismatch' });
 
-  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name))
-    return res.status(200).json(encodePayload({ Valid: false, reason: 'Invalid script name' }, xorKey));
+  if (!isValidScriptName(name))
+    return res.status(200).json(encodeProtectedPayload({ Valid: false, reason: 'Invalid script name' }, xorKey));
 
   let clientData = null;
   if (Data) {
-    const decoded = decodePayload({ Data }, xorKey);
+    const decoded = decodeProtectedPayload({ Data }, xorKey);
     if (decoded.ok) clientData = decoded.data;
   }
 
-  const rngValues = clientData && ['Rng1', 'Rng2', 'Rng3', 'Rng4', 'Rng5']
-    .map((field) => clientData[field]);
-  const rngFloat = clientData?.RngFloat;
-  // A non-integer challenge component catches simple RNG hooks that force a
-  // fixed integer. It is a signal only; server-issued tickets remain the
+  // This is a tamper signal only; server-issued tickets remain the
   // authorization boundary.
-  if (!rngValues || !rngValues.every(Number.isSafeInteger) ||
-      !Number.isFinite(rngFloat) || Number.isInteger(rngFloat)) {
-    return res.status(200).json(encodePayload({
+  const rngChallenge = validateClientChallenge(clientData);
+  if (!rngChallenge.ok) {
+    return res.status(200).json(encodeProtectedPayload({
       Valid: false, reason: 'RNG challenge rejected',
     }, xorKey));
   }
 
-  const scriptToken = crypto.randomBytes(24).toString('hex');
-  const runtimeSecret = crypto.randomBytes(32).toString('hex');
+  const { scriptToken, runtimeSecret } = createRuntimeCredentials();
 
   sessions.set(payload.jti, {
     createdAt: Date.now(),
@@ -257,7 +227,7 @@ async function handleScript(req, res, ip) {
     const p = path.join(process.cwd(), 'scripts', name + '.lua');
     scriptBody = fs.readFileSync(p, 'utf8');
   } catch {
-    return res.status(200).json(encodePayload({ Valid: false, reason: 'Script not found: ' + name }, xorKey));
+    return res.status(200).json(encodeProtectedPayload({ Valid: false, reason: 'Script not found: ' + name }, xorKey));
   }
 
   scriptBody = scriptBody
@@ -266,12 +236,9 @@ async function handleScript(req, res, ip) {
     .replace(/\$\{HWIDHASH\}/g, payload.hwidHash)
     .replace(/\$\{ISSUED\}/g, new Date().toISOString());
 
-  const check = rngValues.map((value, index) => {
-    const { multiplier, offset } = RNG_CHALLENGE[index];
-    return (value * multiplier) + offset;
-  }).join('|');
+  const check = createChallengeResponse(rngChallenge.values);
 
-  return res.status(200).json(encodePayload({
+  return res.status(200).json(encodeProtectedPayload({
     Valid: true,
     check,
     Body: scriptBody,
@@ -299,34 +266,22 @@ async function handleScriptVerify(req, res) {
   if (reason)
     return res.status(403).json({ valid: false, reason: 'Banned: ' + reason });
 
-  if (typeof scriptName === 'string' && scriptName !== session.scriptName)
-    return res.status(403).json({ valid: false, reason: 'scriptName changed' });
-
   if (typeof runtimeSecret !== 'string' || runtimeSecret.length !== 64)
     return res.status(403).json({ valid: false, reason: 'no runtime secret' });
-
-  const expectedBuf = Buffer.from(session.runtimeSecret, 'hex');
-  const givenBuf = Buffer.from(runtimeSecret, 'hex');
-  if (expectedBuf.length !== givenBuf.length ||
-      !crypto.timingSafeEqual(expectedBuf, givenBuf))
-    return res.status(403).json({ valid: false, reason: 'secret mismatch' });
-
-  if (typeof scriptToken !== 'string' || scriptToken.length > 128 ||
-      scriptToken !== session.scriptToken)
-    return res.status(403).json({ valid: false, reason: 'token mismatch' });
-
-  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512 ||
-      session.hwidHash !== hashHwid(hwid))
+  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
     return res.status(403).json({ valid: false, reason: 'hwid mismatch' });
 
-  if (Date.now() - session.createdAt > SESSION_TTL)
-    return res.status(403).json({ valid: false, reason: 'session expired' });
-
-  if (Date.now() - session.scriptIssuedAt > RUNTIME_TTL)
-    return res.status(403).json({ valid: false, reason: 'runtime expired' });
-
-  if (session.verified)
-    return res.status(403).json({ valid: false, reason: 'already verified' });
+  const proofFailure = verifyRuntimeProof({
+    session,
+    runtimeSecret,
+    scriptToken,
+    hwidHash: hashHwid(hwid),
+    scriptName,
+    sessionTtl: SESSION_TTL,
+    runtimeTtl: RUNTIME_TTL,
+  });
+  if (proofFailure)
+    return res.status(403).json({ valid: false, reason: proofFailure });
 
   session.verified = true;
   session.verifiedAt = Date.now();
@@ -353,12 +308,12 @@ async function handleHeartbeat(req, res, ip) {
 
   const session = sessions.get(payload.jti);
   if (!session)
-    return res.status(200).json(encodePayload({ Valid: true, commands: [] }, xorKey));
+    return res.status(200).json(encodeProtectedPayload({ Valid: true, commands: [] }, xorKey));
 
   session.lastBeat = Date.now();
 
   if (Data) {
-    const decoded = decodePayload({ Data }, xorKey);
+    const decoded = decodeProtectedPayload({ Data }, xorKey);
     if (!decoded.ok) {
       session.failCount += 1;
     } else {
@@ -381,7 +336,7 @@ async function handleHeartbeat(req, res, ip) {
     return res.status(200).json({ kick: 'Session expired' });
   }
 
-  return res.status(200).json(encodePayload({
+  return res.status(200).json(encodeProtectedPayload({
     Valid: true, commands: [], t: Date.now(),
   }, xorKey));
 }
