@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { issueTicket, verifyTicket } = require('../lib/ticket');
 const {
   RNG_CHALLENGE_TRANSFORMS,
   createChallengeResponse,
@@ -80,4 +81,18 @@ assert.equal(verifyRuntimeProof({ ...proof, runtimeSecret: '0'.repeat(64) }), 's
 assert.equal(verifyRuntimeProof({ ...proof, hwidHash: 'b'.repeat(64) }), 'hwid mismatch');
 assert.equal(verifyRuntimeProof({ ...proof, session: { ...session, verified: true } }), 'already verified');
 
-console.log('PASS 999MS Server SDK protocol tests');
+const previousTicketSecret = process.env.TICKET_SECRET;
+process.env.TICKET_SECRET = 'test-ticket-secret-with-at-least-thirty-two-characters';
+const ticketOne = issueTicket({ hwidHash: 'a'.repeat(64), scope: 'script', scriptName: 'main' });
+const ticketTwo = issueTicket({ hwidHash: 'a'.repeat(64), scope: 'script', scriptName: 'main' });
+const decodedTicketOne = verifyTicket(ticketOne);
+const decodedTicketTwo = verifyTicket(ticketTwo);
+assert.notEqual(ticketOne, ticketTwo);
+assert.equal(decodedTicketOne.scope, 'script');
+assert.equal(decodedTicketOne.scriptName, 'main');
+assert.match(decodedTicketOne.jti, /^[a-f0-9]{24}$/);
+assert.notEqual(decodedTicketOne.jti, decodedTicketTwo.jti);
+if (previousTicketSecret === undefined) delete process.env.TICKET_SECRET;
+else process.env.TICKET_SECRET = previousTicketSecret;
+
+console.log('PASS 999MS Server SDK and randomized ticket tests');
