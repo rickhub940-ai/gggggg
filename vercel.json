@@ -8,7 +8,7 @@
   "routes": [
     { "src": "/payload\\.lua",       "dest": "/api/auth?action=payload" },
     { "src": "/loadc\\.lua",         "dest": "/api/auth?action=artifact&name=loadc" },
-    { "src": "/savecheck\\.lua",     "dest": "/api/auth?action=artifact&name=savecheck" },
+    { "src": "/loada\\.lua",         "dest": "/api/auth?action=artifact&name=loada" },
     { "src": "/loader\\.lua",        "dest": "/api/auth?action=artifact&name=loader" },
     { "src": "/999MS-sdk\\.lua",     "dest": "/api/auth?action=artifact&name=sdk" },
     { "src": "/api/bootstrap",         "dest": "/api/auth?action=bootstrap" },

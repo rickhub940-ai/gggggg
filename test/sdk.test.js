@@ -50,20 +50,24 @@ assert.deepEqual(multipliers.map((value, index) => [value, offsets[index]]), exp
 
 const loadcSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loadc.lua'), 'utf8');
 const authSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'auth.js'), 'utf8');
+const loadaToken = authSource.match(/const LOADA_ARTIFACT_TOKEN = '([a-f0-9]{64})';/)[1];
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
-const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'savecheck.lua'), 'utf8');
+const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loada.lua'), 'utf8');
 const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8');
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /game:HttpGet\(b\.\."\/api\/bootstrap"\)/);
+assert.match(loadcSource, /b\.\."\/loada\.lua"/);
+assert.match(loadcSource, /\["X-999MS-Token"\]=n/);
+assert.match(loadcSource, new RegExp(`n="${loadaToken}"`));
 assert.match(loadcSource, /Id=id,Stage="stage1"/);
 assert.match(loadcSource, /e\.MS999Chain=nil/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick|\berror\(/);
 assert.match(authSource, /action === 'bootstrap'/);
 assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap' && entry.dest === '/api/auth?action=bootstrap'), true);
-for (const name of ['loadc', 'savecheck', 'loader', 'sdk']) {
+for (const name of ['loadc', 'loada', 'loader', 'sdk']) {
   assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);
 }
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.dest === '/api/auth?action=trap'), true);
@@ -162,12 +166,20 @@ async function requestEndpoint(url, headers = {}) {
     'user-agent': 'Mozilla/5.0',
     'x-client': 'rObLoX',
   });
+  const loadaWithoutToken = await requestEndpoint('/api/auth?action=artifact&name=loada', { 'X-Client': 'ROBLOX' });
+  const loadaWithToken = await requestEndpoint('/api/auth?action=artifact&name=loada', {
+    'X-Client': 'ROBLOX',
+    'X-999MS-Token': loadaToken,
+  });
   const unknownPath = await requestEndpoint('/api/auth?action=trap');
   const robloxUnknownPath = await requestEndpoint('/api/auth?action=trap', { 'X-Roblox': 'CLIENT' });
   assert.equal(executorArtifact.statusCode, 200);
   assert.match(executorArtifact.body, /api\/bootstrap/);
   assert.equal(robloxArtifact.statusCode, 200);
   assert.match(robloxArtifact.body, /api\/bootstrap/);
+  assert.equal(loadaWithoutToken.statusCode, 404);
+  assert.equal(loadaWithToken.statusCode, 200);
+  assert.match(loadaWithToken.body, /^-- supper_Boom/);
   assert.equal(browserArtifact.statusCode, 302);
   assert.equal(browserArtifact.headers.Location, 'https://yura.lol/09ms');
   assert.equal(unknownPath.statusCode, 302);

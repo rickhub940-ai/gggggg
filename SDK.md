@@ -48,7 +48,7 @@ Ticket signing, key verification, revocation/rate limiting และ storage pol
 
 Client SDK เป็น module Lua ที่ไม่สร้าง UI และไม่ทำ anti-save/hook detection เอง เพื่อให้ใช้กับ UI/loader ของคุณได้หลายแบบ ตัว loader ของโปรเจกต์นี้ยังคงเป็นตัวที่รับผิดชอบ stage checks และจะส่ง `getgenv().MS999Request` ที่ capture ไว้เข้า SDK ได้
 
-> `scripts/main.lua` ของโปรเจกต์ถูก lock กับ chain `loadc → savecheck → loader → payload → main` แล้ว จึงต้องเริ่มผ่าน `loadc.lua` เท่านั้น ไม่ควรใช้ Client SDK รัน `main` โดยตรง. Client SDK ยังเหมาะสำหรับ custom body ที่คุณออกแบบ chain/runtime check ของมันเอง.
+> `scripts/main.lua` ของโปรเจกต์ถูก lock กับ chain `loadc → loada → loader → payload → main` แล้ว จึงต้องเริ่มผ่าน `loadc.lua` เท่านั้น ไม่ควรใช้ Client SDK รัน `main` โดยตรง. Client SDK ยังเหมาะสำหรับ custom body ที่คุณออกแบบ chain/runtime check ของมันเอง.
 
 ```lua
 local HttpService = game:GetService("HttpService")

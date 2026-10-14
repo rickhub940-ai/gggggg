@@ -20,9 +20,10 @@ const {
 const sessions = new Map();
 const SESSION_TTL = 30 * 60 * 1000;
 const RUNTIME_TTL = 60 * 1000;
+const LOADA_ARTIFACT_TOKEN = 'dae7f78cb31c846b50b01d3866ff0f2266d08ee89453ed6aea20eea46131ae6b';
 const PUBLIC_ARTIFACTS = Object.freeze({
   loadc: 'loadc.lua',
-  savecheck: 'savecheck.lua',
+  loada: 'loada.lua',
   loader: 'loader.lua',
   sdk: '999MS-sdk.lua',
 });
@@ -81,6 +82,20 @@ function hasRobloxHeader(req) {
     }
   }
   return false;
+}
+
+function hasLoadaToken(req) {
+  let supplied = null;
+  for (const [name, value] of Object.entries(req.headers || {})) {
+    if (name.toLowerCase() === 'x-999ms-token') {
+      supplied = Array.isArray(value) ? value[0] : value;
+      break;
+    }
+  }
+  if (typeof supplied !== 'string') return false;
+  const expected = Buffer.from(LOADA_ARTIFACT_TOKEN, 'utf8');
+  const candidate = Buffer.from(supplied, 'utf8');
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
 }
 
 function isBrowserRequest(req) {
@@ -186,6 +201,7 @@ module.exports = async function handler(req, res) {
 function serveArtifact(req, res, name) {
   const filename = PUBLIC_ARTIFACTS[name];
   if (!filename) return rejectOrTrap(req, res);
+  if (name === 'loada' && !hasLoadaToken(req)) return rejectOrTrap(req, res);
   try {
     const body = fs.readFileSync(path.join(process.cwd(), 'artifacts', filename), 'utf8');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');

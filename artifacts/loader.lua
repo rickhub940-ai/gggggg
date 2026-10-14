@@ -516,7 +516,7 @@ getgenv().MS999Request = RealHttpRequest
 getgenv().MS999RequestAudit = RequestAudit
 
 -- ═══ Stage 3: Anti checks ═══
--- Stage 2 (savecheck.lua) completed its filesystem scan and installed the
+-- Stage 2 (loada.lua) completed its filesystem scan and installed the
 -- trusted Signal.new write monitor.
 
 -- ═══ สร้าง Loader Proof ═══
