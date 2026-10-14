@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -91,6 +92,19 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // ═══ BOOTSTRAP MARK (GET) ═══
+  // This creates a fresh server-random chain identifier for Stage 1. It is
+  // not an authorization ticket; key authorization remains /api/verify.
+  if (action === 'bootstrap') {
+    if (req.method !== 'GET' || isBrowserRequest(req)) return trapRedirect(res);
+    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+               req.socket?.remoteAddress || '';
+    if (!checkRateLimit(ip)) return res.status(429).json({ error: 'Rate limited' });
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return handleBootstrap(res);
+  }
+
   // ═══ อื่นๆ: ต้อง POST ═══
   if (req.method !== 'POST') return trapRedirect(res);
   if (isBrowserRequest(req)) return trapRedirect(res);
@@ -127,6 +141,11 @@ module.exports = async function handler(req, res) {
     return res.status(502).json({ error: 'Service unavailable' });
   }
 };
+
+// ═══ /api/bootstrap ═══
+function handleBootstrap(res) {
+  return res.status(200).json({ id: crypto.randomBytes(32).toString('hex') });
+}
 
 // ═══ /api/verify ═══
 async function handleVerify(req, res, ip) {

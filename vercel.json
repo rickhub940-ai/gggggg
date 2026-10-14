@@ -14,6 +14,7 @@
   ],
   "rewrites": [
     { "source": "/payload.lua",        "destination": "/api/auth?action=payload"        },
+    { "source": "/api/bootstrap",      "destination": "/api/auth?action=bootstrap"      },
     { "source": "/api/verify",         "destination": "/api/auth?action=verify"         },
     { "source": "/api/script",         "destination": "/api/auth?action=script"         },
     { "source": "/api/script-verify",  "destination": "/api/auth?action=script-verify"  },

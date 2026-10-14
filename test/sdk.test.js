@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { issueTicket, verifyTicket } = require('../lib/ticket');
+const authHandler = require('../api/auth');
 const {
   RNG_CHALLENGE_TRANSFORMS,
   createChallengeResponse,
@@ -48,13 +49,20 @@ const offsets = payloadSource.match(/local ChallengeOffsets = \{ ([^}]+) \}/)[1]
 assert.deepEqual(multipliers.map((value, index) => [value, offsets[index]]), expectedTransforms);
 
 const loadcSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'loadc.lua'), 'utf8');
+const authSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'auth.js'), 'utf8');
+const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
 const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'savecheck.lua'), 'utf8');
 const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'loader.lua'), 'utf8');
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-assert.match(loadcSource, /Stage = "stage1"/);
-assert.match(loadcSource, /environment\.MS999Chain = nil\n    return/);
+assert.equal(loadcSource.includes('\n'), false);
+assert.match(loadcSource, /game:HttpGet\(b\.\."\/api\/bootstrap"\)/);
+assert.match(loadcSource, /Id=id,Stage="stage1"/);
+assert.match(loadcSource, /e\.MS999Chain=nil/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick|\berror\(/);
+assert.match(authSource, /action === 'bootstrap'/);
+assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
+assert.equal(vercelConfig.rewrites.some((entry) => entry.source === '/api/bootstrap' && entry.destination === '/api/auth?action=bootstrap'), true);
 assert.match(stageTwoSource, /chainIs\("stage1", CHAIN_TTL\)/);
 assert.match(stageTwoSource, /chain\.Stage = "stage2"/);
 assert.match(loaderSource, /chainIs\("stage2", CHAIN_TTL\)/);
@@ -116,4 +124,35 @@ assert.notEqual(decodedTicketOne.jti, decodedTicketTwo.jti);
 if (previousTicketSecret === undefined) delete process.env.TICKET_SECRET;
 else process.env.TICKET_SECRET = previousTicketSecret;
 
-console.log('PASS 999MS Server SDK and randomized ticket tests');
+async function requestBootstrap() {
+  const response = {
+    headers: {},
+    statusCode: null,
+    body: null,
+    setHeader(name, value) { this.headers[name] = value; },
+    status(code) { this.statusCode = code; return this; },
+    json(value) { this.body = value; return this; },
+    send(value) { this.body = value; return this; },
+  };
+  await authHandler({
+    url: '/api/auth?action=bootstrap',
+    method: 'GET',
+    headers: {},
+    socket: { remoteAddress: 'sdk-test' },
+  }, response);
+  return response;
+}
+
+(async () => {
+  const firstBootstrap = await requestBootstrap();
+  const secondBootstrap = await requestBootstrap();
+  assert.equal(firstBootstrap.statusCode, 200);
+  assert.equal(secondBootstrap.statusCode, 200);
+  assert.match(firstBootstrap.body.id, /^[a-f0-9]{64}$/);
+  assert.match(secondBootstrap.body.id, /^[a-f0-9]{64}$/);
+  assert.notEqual(firstBootstrap.body.id, secondBootstrap.body.id);
+  console.log('PASS 999MS Server SDK, randomized ticket, and bootstrap tests');
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
