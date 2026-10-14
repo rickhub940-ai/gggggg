@@ -36,17 +36,18 @@ for (let index = 0; index < values.length; index += 1) {
 }
 
 const expectedTransforms = RNG_CHALLENGE_TRANSFORMS.map(({ multiplier, offset }) => [multiplier, offset]);
-
-function assertGoofyscatorArtifact(source, name) {
-  assert.match(source, /^-- This file is protected by goofyscator V11 BETA-1/);
-  assert.match(source, /\nreturn \(\{/);
-  assert.ok(source.length > 10000, `${name} obfuscated output is unexpectedly small`);
-}
-
 const clientSdkSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8');
+const clientSdkTransforms = [...clientSdkSource.matchAll(
+  /\{ multiplier = (-?\d+), offset = (-?\d+) \}/g,
+)].map((match) => [Number(match[1]), Number(match[2])]);
+assert.deepEqual(clientSdkTransforms, expectedTransforms);
+
 const payloadSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
-assertGoofyscatorArtifact(clientSdkSource, '999MS-sdk.lua');
-assertGoofyscatorArtifact(payloadSource, 'payload.lua');
+const multipliers = payloadSource.match(/local ChallengeMultipliers = \{ ([^}]+) \}/)[1]
+  .split(',').map((value) => Number(value.trim()));
+const offsets = payloadSource.match(/local ChallengeOffsets = \{ ([^}]+) \}/)[1]
+  .split(',').map((value) => Number(value.trim()));
+assert.deepEqual(multipliers.map((value, index) => [value, offsets[index]]), expectedTransforms);
 
 const loadcSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loadc.lua'), 'utf8');
 const authSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'auth.js'), 'utf8');
@@ -56,7 +57,7 @@ const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'verc
 const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8');
 const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-assert.equal(loadaSha, '2106087f620508dcc5e3460edf3974cf81282b81795a102d85e9ae809c78a0df');
+assert.equal(loadaSha, 'e52b42e8c3ab1129798721cbe68ab034d7fe944a9f296fc385ca51a316b707c0');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /local d="__LOADA_D__"/);
 assert.match(loadcSource, /local n="__LOADA_N__"/);
@@ -85,12 +86,18 @@ assert.equal(vercelConfig.routes.some((entry) => (
   entry.dest === '/api/auth?action=artifact&name=loada&d=$1&n=$2'
 )), true);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.dest === '/api/auth?action=trap'), true);
-assert.match(stageTwoSource, /^-- supper_Boom\n-- This file is protected by goofyscator V11 BETA-1/);
-assert.match(stageTwoSource, /\nreturn \(\{/);
-assertGoofyscatorArtifact(loaderSource, 'loader.lua');
-assertGoofyscatorArtifact(payloadLuaSource, 'payload.lua');
-assert.match(mainSource, /ChainEnv\.MS999Chain/);
+assert.match(stageTwoSource, /chainIs\("stage1", CHAIN_TTL\)/);
+assert.match(stageTwoSource, /chain\.Stage = "stage2"/);
+assert.match(loaderSource, /chainIs\("stage2", CHAIN_TTL\)/);
+assert.match(loaderSource, /Chain\.Stage = "loader"/);
+assert.match(payloadLuaSource, /chainIs\("loader", CHAIN_TTL\)/);
+assert.match(payloadLuaSource, /Chain\.Stage = "payload"/);
+assert.match(payloadLuaSource, /Chain\.Stage = "script"/);
 assert.match(mainSource, /Chain\.Stage ~= "script"/);
+assert.match(loaderSource, /local Stage2WriteMonitor = getgenv\(\)\.MS999WriteMonitor/);
+assert.match(loaderSource, /RealWriteFile = type\(Stage2WriteMonitor\) == "function" and Stage2WriteMonitor/);
+assert.match(payloadLuaSource, /local Stage2WriteMonitor = getgenv\(\)\.MS999WriteMonitor/);
+assert.match(payloadLuaSource, /RealWriteFile = type\(Stage2WriteMonitor\) == "function" and Stage2WriteMonitor or writefile/);
 
 assert.equal(isValidScriptName('main'), true);
 assert.equal(isValidScriptName('main-v2_1'), true);
