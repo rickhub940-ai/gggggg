@@ -3,6 +3,59 @@
 -- ===========================================================
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- Display an opaque local reference rather than exposing a human-readable
+-- client-side check reason in Roblox's error prompt.
+local function makeKickCode(reason)
+    local text = tostring(reason or "unknown")
+    local hash = 5381
+    for index = 1, #text do
+        hash = (hash * 33 + text:byte(index) + index) % 2147483647
+    end
+    return string.format("MS9-%08X", hash)
+end
+
+local function patchErrorPrompt(code)
+    local success, changed = pcall(function()
+        local root = CoreGui:FindFirstChild("RobloxPromptGui")
+        local overlay = root and root:FindFirstChild("promptOverlay")
+        local prompt = overlay and overlay:FindFirstChild("ErrorPrompt")
+        local titleFrame = prompt and prompt:FindFirstChild("TitleFrame")
+        local title = titleFrame and titleFrame:FindFirstChild("ErrorTitle")
+        local messageArea = prompt and prompt:FindFirstChild("MessageArea")
+        local errorFrame = messageArea and messageArea:FindFirstChild("ErrorFrame")
+        local label = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
+        if not title or not label then return false end
+        title.Text = "[999MS]"
+        label.Text = "Session terminated.\nReference: " .. code
+        return true
+    end)
+    return success and changed
+end
+
+local function Kick(reason)
+    local code = makeKickCode(reason)
+    pcall(function()
+        CoreGui.ChildAdded:Connect(function(child)
+            if child.Name == "RobloxPromptGui" then
+                task.spawn(function()
+                    task.wait(0.01)
+                    patchErrorPrompt(code)
+                end)
+            end
+        end)
+    end)
+    task.spawn(function()
+        for _ = 1, 50 do
+            if patchErrorPrompt(code) then break end
+            task.wait(0.01)
+        end
+    end)
+    return LocalPlayer:Kick(code)
+end
+
 local RunService = game:GetService("RunService")
 
 local BASE_URL = "https://keysytemdemo.vercel.app"
@@ -27,7 +80,7 @@ local function chainIs(stage, maxAge)
 end
 
 if not chainIs("loader", CHAIN_TTL) then
-    return Players.LocalPlayer:Kick("[999MS] Chain rejected: run loadc.lua")
+    return Kick("[999MS] Chain rejected: run loadc.lua")
 end
 
 -- ═══ L1-L3: Loader Proof ═══
@@ -36,19 +89,19 @@ local LoaderTime = getgenv().MS999LoaderTime
 local LoaderMarker = getgenv().MS999LoaderMarker
 
 if type(LoaderProof) ~= "string" then
-    return Players.LocalPlayer:Kick("[999MS] L1: Not run via loader")
+    return Kick("[999MS] L1: Not run via loader")
 end
 if not LoaderProof:match("^999MS_loader_v1:[a-z]+$") then
-    return Players.LocalPlayer:Kick("[999MS] L1: Invalid proof")
+    return Kick("[999MS] L1: Invalid proof")
 end
 if not LoaderTime or (tick() - LoaderTime) > 10 then
-    return Players.LocalPlayer:Kick("[999MS] L2: Proof expired")
+    return Kick("[999MS] L2: Proof expired")
 end
 if type(LoaderMarker) ~= "string" or not LoaderMarker:match("^LSE_%d+$") then
-    return Players.LocalPlayer:Kick("[999MS] L3: Invalid marker")
+    return Kick("[999MS] L3: Invalid marker")
 end
 if not chainIs("loader", CHAIN_TTL) then
-    return Players.LocalPlayer:Kick("[999MS] Chain interrupted before payload")
+    return Kick("[999MS] Chain interrupted before payload")
 end
 Chain.Stage = "payload"
 Chain.UpdatedAt = tick()
@@ -56,7 +109,7 @@ Chain.UpdatedAt = tick()
 -- ═══ Signal bus ═══
 local MS999Signal = getgenv().MS999Signal
 if type(MS999Signal) ~= "table" then
-    return Players.LocalPlayer:Kick("[999MS] Signal bus missing")
+    return Kick("[999MS] Signal bus missing")
 end
 
 -- ═══ Capture real ═══
@@ -76,13 +129,13 @@ local RealLoadstring = loadstring
 if type(RealWriteFile) == "function" then
     local info = RealDebugGetInfo(RealWriteFile)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[999MS] L4: writefile wrapped")
+        return Kick("[999MS] L4: writefile wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealWriteFile)
         local stageTwoMonitor = getgenv().MS999WriteMonitor
         if ok and hooked and stageTwoMonitor ~= RealWriteFile then
-            return Players.LocalPlayer:Kick("[999MS] L4: writefile hooked")
+            return Kick("[999MS] L4: writefile hooked")
         end
     end
 end
@@ -90,12 +143,12 @@ end
 if type(RealHookFunction) == "function" then
     local info = RealDebugGetInfo(RealHookFunction)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[999MS] L5: hookfunction wrapped")
+        return Kick("[999MS] L5: hookfunction wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealHookFunction)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[999MS] L5: hookfunction hooked")
+            return Kick("[999MS] L5: hookfunction hooked")
         end
     end
 end
@@ -103,12 +156,12 @@ end
 if type(RealRawset) == "function" then
     local info = RealDebugGetInfo(RealRawset)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[999MS] L6: rawset wrapped")
+        return Kick("[999MS] L6: rawset wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealRawset)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[999MS] L6: rawset hooked")
+            return Kick("[999MS] L6: rawset hooked")
         end
     end
 end
@@ -186,22 +239,23 @@ local function StopChecks()
 end
 
 local function KickPlayer(Reason, Code)
-    print("[999MS] Kick:", tostring(Reason))
+    local detail = tostring(Reason)
+    print("[999MS] Kick:", makeKickCode(detail))
     if Code == 0 and rawequal(Code, 0) then
-        Players.LocalPlayer:Kick(tostring(Reason))
+        Kick(detail)
     elseif Code == 1 and rawequal(Code, 1) then
-        Players.LocalPlayer:Kick(tostring(Reason))
+        Kick(detail)
         if math.random() == math.random() then SecureCrash() end
         task.wait(math.random(13, 28))
         SecureCrash()
     else
-        Players.LocalPlayer:Kick(tostring(Reason))
+        Kick(detail)
     end
 end
 
 local function TamperKick(code)
     pcall(function()
-        Players.LocalPlayer:Kick("[999MS] Tamper detected (" .. code .. ")")
+        Kick("[999MS] Tamper detected (" .. code .. ")")
     end)
     task.wait(0.3)
     SecureCrash()

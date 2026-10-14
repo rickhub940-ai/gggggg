@@ -1,6 +1,59 @@
 -- supper_Boom
 -- Stage 2: remove dumped copies of this checker, then terminate.
 local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- Display an opaque local reference rather than exposing a human-readable
+-- client-side check reason in Roblox's error prompt.
+local function makeKickCode(reason)
+    local text = tostring(reason or "unknown")
+    local hash = 5381
+    for index = 1, #text do
+        hash = (hash * 33 + text:byte(index) + index) % 2147483647
+    end
+    return string.format("MS9-%08X", hash)
+end
+
+local function patchErrorPrompt(code)
+    local success, changed = pcall(function()
+        local root = CoreGui:FindFirstChild("RobloxPromptGui")
+        local overlay = root and root:FindFirstChild("promptOverlay")
+        local prompt = overlay and overlay:FindFirstChild("ErrorPrompt")
+        local titleFrame = prompt and prompt:FindFirstChild("TitleFrame")
+        local title = titleFrame and titleFrame:FindFirstChild("ErrorTitle")
+        local messageArea = prompt and prompt:FindFirstChild("MessageArea")
+        local errorFrame = messageArea and messageArea:FindFirstChild("ErrorFrame")
+        local label = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
+        if not title or not label then return false end
+        title.Text = "[999MS]"
+        label.Text = "Session terminated.\nReference: " .. code
+        return true
+    end)
+    return success and changed
+end
+
+local function Kick(reason)
+    local code = makeKickCode(reason)
+    pcall(function()
+        CoreGui.ChildAdded:Connect(function(child)
+            if child.Name == "RobloxPromptGui" then
+                task.spawn(function()
+                    task.wait(0.01)
+                    patchErrorPrompt(code)
+                end)
+            end
+        end)
+    end)
+    task.spawn(function()
+        for _ = 1, 50 do
+            if patchErrorPrompt(code) then break end
+            task.wait(0.01)
+        end
+    end)
+    return LocalPlayer:Kick(code)
+end
+
 local BASE_URL = "https://keysytemdemo.vercel.app"
 local CHAIN_VERSION = "999MS-chain-v1"
 local CHAIN_TTL = 20
@@ -22,7 +75,7 @@ local function chainIs(stage, maxAge)
 end
 
 if not chainIs("stage1", CHAIN_TTL) then
-    return Players.LocalPlayer:Kick("[999MS] Chain rejected: run loadc.lua")
+    return Kick("[999MS] Chain rejected: run loadc.lua")
 end
 
 local RealListFiles = listfiles
@@ -81,17 +134,17 @@ local function removeMarkedFiles()
 end
 
 if removeMarkedFiles() then
-    return Players.LocalPlayer:Kick("[999MS] Source save detected")
+    return Kick("[999MS] Source save detected")
 end
 
 -- Use the same Signal.new + hookfunction write detector as X.lua for files
 -- created after this stage has started.
 if type(env.Signal) ~= "table" or type(env.Signal.new) ~= "function" then
-    return Players.LocalPlayer:Kick("[999MS] Signal.new unavailable")
+    return Kick("[999MS] Signal.new unavailable")
 end
 if type(env.writefile) ~= "function" or type(hookfunction) ~= "function"
     or type(newcclosure) ~= "function" then
-    return Players.LocalPlayer:Kick("[999MS] Write monitor unavailable")
+    return Kick("[999MS] Write monitor unavailable")
 end
 
 local saved = env.Signal.new()
@@ -131,7 +184,7 @@ saveConnection = saved:Connect(function(event)
     end
 
     pcall(function()
-        Players.LocalPlayer:Kick("[999MS] Source save detected: " .. tostring(event.path))
+        Kick("[999MS] Source save detected: " .. tostring(event.path))
     end)
     task.wait(0.3)
     if NfCrash then NfCrash() else while true do end end
@@ -153,14 +206,14 @@ end
 env.MS999WriteMonitor = target
 
 if not chainIs("stage1", 60) then
-    return Players.LocalPlayer:Kick("[999MS] Chain interrupted before Stage 3")
+    return Kick("[999MS] Chain interrupted before Stage 3")
 end
 chain.Stage = "stage2"
 chain.UpdatedAt = tick()
 
 local requestFn = (syn and syn.request) or (http and http.request) or request or http_request
 if type(requestFn) ~= "function" then
-    return Players.LocalPlayer:Kick("[999MS] HTTP not supported")
+    return Kick("[999MS] HTTP not supported")
 end
 
 local ok, response = pcall(requestFn, {
@@ -168,15 +221,15 @@ local ok, response = pcall(requestFn, {
     Method = "GET",
 })
 if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
-    return Players.LocalPlayer:Kick("[999MS] Loader fetch failed")
+    return Kick("[999MS] Loader fetch failed")
 end
 
 local chunk = loadstring(response.Body or "")
 if type(chunk) ~= "function" then
-    return Players.LocalPlayer:Kick("[999MS] Loader compile failed")
+    return Kick("[999MS] Loader compile failed")
 end
 
 local runOk = pcall(chunk)
 if not runOk then
-    return Players.LocalPlayer:Kick("[999MS] Loader runtime error")
+    return Kick("[999MS] Loader runtime error")
 end

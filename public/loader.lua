@@ -3,6 +3,59 @@
 -- Anti-Save ตามไฟล์ X 100%
 -- ===========================================================
 local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- Display an opaque local reference rather than exposing a human-readable
+-- client-side check reason in Roblox's error prompt.
+local function makeKickCode(reason)
+    local text = tostring(reason or "unknown")
+    local hash = 5381
+    for index = 1, #text do
+        hash = (hash * 33 + text:byte(index) + index) % 2147483647
+    end
+    return string.format("MS9-%08X", hash)
+end
+
+local function patchErrorPrompt(code)
+    local success, changed = pcall(function()
+        local root = CoreGui:FindFirstChild("RobloxPromptGui")
+        local overlay = root and root:FindFirstChild("promptOverlay")
+        local prompt = overlay and overlay:FindFirstChild("ErrorPrompt")
+        local titleFrame = prompt and prompt:FindFirstChild("TitleFrame")
+        local title = titleFrame and titleFrame:FindFirstChild("ErrorTitle")
+        local messageArea = prompt and prompt:FindFirstChild("MessageArea")
+        local errorFrame = messageArea and messageArea:FindFirstChild("ErrorFrame")
+        local label = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
+        if not title or not label then return false end
+        title.Text = "[999MS]"
+        label.Text = "Session terminated.\nReference: " .. code
+        return true
+    end)
+    return success and changed
+end
+
+local function Kick(reason)
+    local code = makeKickCode(reason)
+    pcall(function()
+        CoreGui.ChildAdded:Connect(function(child)
+            if child.Name == "RobloxPromptGui" then
+                task.spawn(function()
+                    task.wait(0.01)
+                    patchErrorPrompt(code)
+                end)
+            end
+        end)
+    end)
+    task.spawn(function()
+        for _ = 1, 50 do
+            if patchErrorPrompt(code) then break end
+            task.wait(0.01)
+        end
+    end)
+    return LocalPlayer:Kick(code)
+end
+
 local HttpService = game:GetService("HttpService")
 
 local BASE_URL = "https://keysytemdemo.vercel.app"
@@ -26,26 +79,26 @@ local function chainIs(stage, maxAge)
 end
 
 if not chainIs("stage2", CHAIN_TTL) then
-    return Players.LocalPlayer:Kick("[999MS] Chain rejected: run loadc.lua")
+    return Kick("[999MS] Chain rejected: run loadc.lua")
 end
 
 -- ═══ T0: require getgenv().script ═══
 local userScript = getgenv().script or _G.script
 if userScript == nil then
-    return Players.LocalPlayer:Kick(
+    return Kick(
         "[999MS] Set getgenv().script first:\n\n" ..
         'getgenv().script = "scriptname"\n' ..
         'loadstring(game:HttpGet("' .. BASE_URL .. '/loadc.lua"))()'
     )
 end
 if type(userScript) ~= "string" then
-    return Players.LocalPlayer:Kick("[999MS] getgenv().script must be string")
+    return Kick("[999MS] getgenv().script must be string")
 end
 if #userScript < 1 or #userScript > 64 then
-    return Players.LocalPlayer:Kick("[999MS] getgenv().script must be 1-64 chars")
+    return Kick("[999MS] getgenv().script must be 1-64 chars")
 end
 if not userScript:match("^[%w_%-]+$") then
-    return Players.LocalPlayer:Kick("[999MS] getgenv().script invalid format")
+    return Kick("[999MS] getgenv().script invalid format")
 end
 
 local SCRIPT_NAME = userScript
@@ -91,16 +144,18 @@ end
 
 -- ═══ Subscribers ═══
 MS999Signal.OnKick:Connect(function(reason)
-    print("[999MS] KICK:", reason)
+    local detail = "signal:" .. tostring(reason)
+    print("[999MS] KICK:", makeKickCode(detail))
     pcall(function()
-        Players.LocalPlayer:Kick("[999MS] " .. reason)
+        Kick(detail)
     end)
     task.wait(0.3)
     if NfCrash then NfCrash() else while true do end end
 end)
 
 MS999Signal.OnLog:Connect(function(type, data)
-    print("[999MS][LOG]", type, data and data.path or data or "")
+    local detail = tostring(type) .. ":" .. tostring(data and data.path or data or "")
+    print("[999MS][LOG]", makeKickCode(detail))
 end)
 
 MS999Signal.OnDetect:Connect(function(event)
@@ -161,14 +216,14 @@ end
 
 -- ═══ T2: Studio check ═══
 if game:GetService("RunService"):IsStudio() then
-    return Players.LocalPlayer:Kick("[999MS] T2: Studio detected")
+    return Kick("[999MS] T2: Studio detected")
 end
 
 -- ═══ T3: pcall anti-hook ═══
 do
     local ok, err = pcall(pcall)
     if ok or err ~= "missing argument #1" then
-        return Players.LocalPlayer:Kick("[999MS] T3: pcall hooked")
+        return Kick("[999MS] T3: pcall hooked")
     end
 end
 
@@ -184,7 +239,7 @@ guard("rawget", RealRawget)
 -- ═══ T5: math.random behavior ═══
 do
     if math.random(1, 2) == math.random(3, 4) then
-        return Players.LocalPlayer:Kick("[999MS] T5: math.random hooked")
+        return Kick("[999MS] T5: math.random hooked")
     end
     local Same, Last = 0, 0
     for _ = 1, 100 do
@@ -193,7 +248,7 @@ do
         Last = Cur
     end
     if Same > 10 then
-        return Players.LocalPlayer:Kick("[999MS] T5: math.random broken")
+        return Kick("[999MS] T5: math.random broken")
     end
 end
 
@@ -202,7 +257,7 @@ do
     local test = {}
     getgenv().__MS999_test = test
     if getgenv().__MS999_test ~= test then
-        return Players.LocalPlayer:Kick("[999MS] T6: getgenv tampered")
+        return Kick("[999MS] T6: getgenv tampered")
     end
     getgenv().__MS999_test = nil
 end
@@ -254,31 +309,31 @@ end
 
 do
     if type(SafeLoadstring) ~= "function" then
-        return Players.LocalPlayer:Kick("[999MS] T13: loadstring missing")
+        return Kick("[999MS] T13: loadstring missing")
     end
     local info = RealDebugGetInfo(SafeLoadstring)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[999MS] T13: loadstring wrapped")
+        return Kick("[999MS] T13: loadstring wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, SafeLoadstring)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[999MS] T13: loadstring hooked")
+            return Kick("[999MS] T13: loadstring hooked")
         end
     end
     if SafeGetGenv().loadstring ~= SafeLoadstring then
-        return Players.LocalPlayer:Kick("[999MS] T13: getgenv().loadstring replaced")
+        return Kick("[999MS] T13: getgenv().loadstring replaced")
     end
     if loadstringWritesSource() then
-        return Players.LocalPlayer:Kick("[999MS] T13: loadstring attempted to save source")
+        return Kick("[999MS] T13: loadstring attempted to save source")
     end
     local ok, fn = pcall(SafeLoadstring, "return 1 + 1")
     if not ok or type(fn) ~= "function" then
-        return Players.LocalPlayer:Kick("[999MS] T13: loadstring broken")
+        return Kick("[999MS] T13: loadstring broken")
     end
     local ok2, result = pcall(fn)
     if not ok2 or result ~= 2 then
-        return Players.LocalPlayer:Kick("[999MS] T13: loadstring malfunction")
+        return Kick("[999MS] T13: loadstring malfunction")
     end
 end
 
@@ -287,17 +342,17 @@ do
     if type(RealWriteFile) == "function" then
         local info = RealDebugGetInfo(RealWriteFile)
         if not info or info.what ~= "C" then
-            return Players.LocalPlayer:Kick("[999MS] T14: writefile wrapped")
+            return Kick("[999MS] T14: writefile wrapped")
         end
         if type(RealIsHooked) == "function" then
             local ok, hooked = pcall(RealIsHooked, RealWriteFile)
             local trustedWriteMonitor = SafeGetGenv().MS999WriteMonitor == RealWriteFile
             if ok and hooked and not trustedWriteMonitor then
-                return Players.LocalPlayer:Kick("[999MS] T14: writefile hooked")
+                return Kick("[999MS] T14: writefile hooked")
             end
         end
         if SafeGetGenv().writefile and SafeGetGenv().writefile ~= RealWriteFile then
-            return Players.LocalPlayer:Kick("[999MS] T14: writefile replaced")
+            return Kick("[999MS] T14: writefile replaced")
         end
     end
 end
@@ -307,12 +362,12 @@ do
     if type(RealHookFunction) == "function" then
         local info = RealDebugGetInfo(RealHookFunction)
         if not info or info.what ~= "C" then
-            return Players.LocalPlayer:Kick("[999MS] T16: hookfunction wrapped")
+            return Kick("[999MS] T16: hookfunction wrapped")
         end
         if type(RealIsHooked) == "function" then
             local ok, hooked = pcall(RealIsHooked, RealHookFunction)
             if ok and hooked then
-                return Players.LocalPlayer:Kick("[999MS] T16: hookfunction hooked")
+                return Kick("[999MS] T16: hookfunction hooked")
             end
         end
     end
@@ -321,43 +376,43 @@ end
 -- ═══ T-RAWSET1: rawset protection ═══
 do
     if type(RealRawset) ~= "function" then
-        return Players.LocalPlayer:Kick("[999MS] T-RAWSET1: rawset missing")
+        return Kick("[999MS] T-RAWSET1: rawset missing")
     end
     local info = RealDebugGetInfo(RealRawset)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[999MS] T-RAWSET1: rawset wrapped")
+        return Kick("[999MS] T-RAWSET1: rawset wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealRawset)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[999MS] T-RAWSET1: rawset hooked")
+            return Kick("[999MS] T-RAWSET1: rawset hooked")
         end
     end
     local t = {}
     pcall(RealRawset, t, "test", 12345)
     if t.test ~= 12345 then
-        return Players.LocalPlayer:Kick("[999MS] T-RAWSET1: rawset broken")
+        return Kick("[999MS] T-RAWSET1: rawset broken")
     end
 end
 
 -- ═══ T-RAWSET2: rawget protection ═══
 do
     if type(RealRawget) ~= "function" then
-        return Players.LocalPlayer:Kick("[999MS] T-RAWSET2: rawget missing")
+        return Kick("[999MS] T-RAWSET2: rawget missing")
     end
     local info = RealDebugGetInfo(RealRawget)
     if not info or info.what ~= "C" then
-        return Players.LocalPlayer:Kick("[999MS] T-RAWSET2: rawget wrapped")
+        return Kick("[999MS] T-RAWSET2: rawget wrapped")
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealRawget)
         if ok and hooked then
-            return Players.LocalPlayer:Kick("[999MS] T-RAWSET2: rawget hooked")
+            return Kick("[999MS] T-RAWSET2: rawget hooked")
         end
     end
     local t = { test = 999 }
     if RealRawget(t, "test") ~= 999 then
-        return Players.LocalPlayer:Kick("[999MS] T-RAWSET2: rawget broken")
+        return Kick("[999MS] T-RAWSET2: rawget broken")
     end
 end
 
@@ -392,7 +447,7 @@ end
 do
     local ok, reason = checkGenvIntegrity()
     if not ok then
-        return Players.LocalPlayer:Kick("[999MS] T-RAWSET3: " .. reason)
+        return Kick("[999MS] T-RAWSET3: " .. reason)
     end
 end
 
@@ -444,7 +499,7 @@ do
     end
 
     if not RealHttpRequest then
-        return Players.LocalPlayer:Kick("[999MS] No trusted HTTP request")
+        return Kick("[999MS] No trusted HTTP request")
     end
 end
 
@@ -504,12 +559,12 @@ end
 do
     local ok, reason = checkMS999Flags()
     if not ok then
-        return Players.LocalPlayer:Kick("[999MS] T-RAWSET4: " .. reason)
+        return Kick("[999MS] T-RAWSET4: " .. reason)
     end
 end
 
 if not chainIs("stage2", 45) then
-    return Players.LocalPlayer:Kick("[999MS] Chain interrupted before payload")
+    return Kick("[999MS] Chain interrupted before payload")
 end
 Chain.Stage = "loader"
 Chain.UpdatedAt = tick()
@@ -523,17 +578,17 @@ local ok, response = pcall(HttpRequest, {
     Method = "GET",
 })
 if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
-    return Players.LocalPlayer:Kick("[999MS] Payload fetch failed")
+    return Kick("[999MS] Payload fetch failed")
 end
 
 local payloadSrc = response.Body or ""
 if #payloadSrc < 100 then
-    return Players.LocalPlayer:Kick("[999MS] Invalid payload")
+    return Kick("[999MS] Invalid payload")
 end
 
 print("[999MS] Payload received, running...")
 
 local fn = SafeLoadstring(payloadSrc)
-if not fn then return Players.LocalPlayer:Kick("[999MS] Load failed") end
+if not fn then return Kick("[999MS] Load failed") end
 local runOk = pcall(fn)
-if not runOk then return Players.LocalPlayer:Kick("[999MS] Runtime error") end
+if not runOk then return Kick("[999MS] Runtime error") end

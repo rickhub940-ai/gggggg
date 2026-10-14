@@ -2,6 +2,59 @@
 --// 999MS Script — Blox Fruits
 --// ═══════════════════════════════════════════════════════════
 local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- Display an opaque local reference rather than exposing a human-readable
+-- client-side check reason in Roblox's error prompt.
+local function makeKickCode(reason)
+    local text = tostring(reason or "unknown")
+    local hash = 5381
+    for index = 1, #text do
+        hash = (hash * 33 + text:byte(index) + index) % 2147483647
+    end
+    return string.format("MS9-%08X", hash)
+end
+
+local function patchErrorPrompt(code)
+    local success, changed = pcall(function()
+        local root = CoreGui:FindFirstChild("RobloxPromptGui")
+        local overlay = root and root:FindFirstChild("promptOverlay")
+        local prompt = overlay and overlay:FindFirstChild("ErrorPrompt")
+        local titleFrame = prompt and prompt:FindFirstChild("TitleFrame")
+        local title = titleFrame and titleFrame:FindFirstChild("ErrorTitle")
+        local messageArea = prompt and prompt:FindFirstChild("MessageArea")
+        local errorFrame = messageArea and messageArea:FindFirstChild("ErrorFrame")
+        local label = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
+        if not title or not label then return false end
+        title.Text = "[999MS]"
+        label.Text = "Session terminated.\nReference: " .. code
+        return true
+    end)
+    return success and changed
+end
+
+local function Kick(reason)
+    local code = makeKickCode(reason)
+    pcall(function()
+        CoreGui.ChildAdded:Connect(function(child)
+            if child.Name == "RobloxPromptGui" then
+                task.spawn(function()
+                    task.wait(0.01)
+                    patchErrorPrompt(code)
+                end)
+            end
+        end)
+    end)
+    task.spawn(function()
+        for _ = 1, 50 do
+            if patchErrorPrompt(code) then break end
+            task.wait(0.01)
+        end
+    end)
+    return LocalPlayer:Kick(code)
+end
+
 local HttpService = game:GetService("HttpService")
 local ExpectedScript = "${SCRIPTID}"
 local CHAIN_VERSION = "999MS-chain-v1"
@@ -16,11 +69,11 @@ if type(Chain) ~= "table"
     or type(Chain.UpdatedAt) ~= "number"
     or tick() - Chain.UpdatedAt < 0
     or tick() - Chain.UpdatedAt > 20 then
-    return Players.LocalPlayer:Kick("[999MS] Chain rejected: run loadc.lua")
+    return Kick("[999MS] Chain rejected: run loadc.lua")
 end
 
 if not getgenv().MS999Loader then
-    return Players.LocalPlayer:Kick("[999MS] Must run via loader")
+    return Kick("[999MS] Must run via loader")
 end
 
 local RuntimeSecret = getgenv().MS999Secret
@@ -29,18 +82,18 @@ local ScriptToken = getgenv().MS999Token
 local MS999Script = getgenv().MS999Script
 
 if type(RuntimeSecret) ~= "string" or #RuntimeSecret ~= 64 then
-    return Players.LocalPlayer:Kick("[999MS] Missing runtime secret")
+    return Kick("[999MS] Missing runtime secret")
 end
 if not Ticket or not ScriptToken then
-    return Players.LocalPlayer:Kick("[999MS] Invalid session")
+    return Kick("[999MS] Invalid session")
 end
 if MS999Script ~= ExpectedScript then
-    return Players.LocalPlayer:Kick("[999MS] Script mismatch")
+    return Kick("[999MS] Script mismatch")
 end
 
 local LoadTime = getgenv().MS999LoadTime
 if not LoadTime or (tick() - LoadTime) > 60 then
-    return Players.LocalPlayer:Kick("[999MS] Session expired")
+    return Kick("[999MS] Session expired")
 end
 
 local function getHWID()
@@ -60,7 +113,7 @@ end
 
 local BASE_URL = "https://keysytemdemo.vercel.app"
 local req = getRequest()
-if not req then return Players.LocalPlayer:Kick("[999MS] HTTP not supported") end
+if not req then return Kick("[999MS] HTTP not supported") end
 
 local ok, res = pcall(req, {
     Url = BASE_URL .. "/api/script-verify",
@@ -76,13 +129,13 @@ local ok, res = pcall(req, {
 })
 
 if not ok or type(res) ~= "table" then
-    return Players.LocalPlayer:Kick("[999MS] Verification failed")
+    return Kick("[999MS] Verification failed")
 end
 
 local decoded
 pcall(function() decoded = HttpService:JSONDecode(res.Body) end)
 if not decoded or decoded.valid ~= true then
-    return Players.LocalPlayer:Kick("[999MS] " .. ((decoded and decoded.reason) or "Unauthorized"))
+    return Kick("[999MS] " .. ((decoded and decoded.reason) or "Unauthorized"))
 end
 
 -- The one-time runtime proof succeeded; consume the client chain mark.
