@@ -11,7 +11,6 @@
     { "src": "/loada\\.lua/([^/]+)/([^/]+)", "dest": "/api/auth?action=artifact&name=loada&d=$1&n=$2" },
     { "src": "/loader\\.lua",        "dest": "/api/auth?action=artifact&name=loader" },
     { "src": "/999MS-sdk\\.lua",     "dest": "/api/auth?action=artifact&name=sdk" },
-    { "src": "/api/bootstrap",         "dest": "/api/auth?action=bootstrap" },
     { "src": "/api/verify",            "dest": "/api/auth?action=verify" },
     { "src": "/api/script",            "dest": "/api/auth?action=script" },
     { "src": "/api/script-verify",     "dest": "/api/auth?action=script-verify" },

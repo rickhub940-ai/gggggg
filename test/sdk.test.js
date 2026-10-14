@@ -59,25 +59,25 @@ const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts',
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
 assert.equal(loadaSha, 'e52b42e8c3ab1129798721cbe68ab034d7fe944a9f296fc385ca51a316b707c0');
 assert.equal(loadcSource.includes('\n'), false);
-assert.match(loadcSource, /game:HttpGet\(b\.\."\/api\/bootstrap"\)/);
+assert.match(loadcSource, /local d="__LOADA_D__"/);
+assert.match(loadcSource, /local n="__LOADA_N__"/);
+assert.match(loadcSource, /local i="__CHAIN_ID__"/);
 assert.match(loadcSource, /local u=b\.\."\/loada\.lua\/"\.\.d\.\."\/"\.\.n/);
-assert.doesNotMatch(loadcSource, /X-999MS-Token/);
-assert.match(loadcSource, new RegExp(`local h=\"${loadaSha}\"`));
-assert.match(loadcSource, /local d=o and type\(t\)=="table"and t\.d or nil/);
-assert.match(loadcSource, /local n=o and type\(t\)=="table"and t\.n or nil/);
+assert.doesNotMatch(loadcSource, /api\/bootstrap|game:HttpGet|X-999MS-Token/);
+assert.match(loadcSource, new RegExp(`local h=\\"${loadaSha}\\"`));
 assert.doesNotMatch(loadcSource, /LOADA_ARTIFACT_TOKEN|dae7f78cb31c846b50b01d3866ff0f2266d08ee89453ed6aea20eea46131ae6b/);
-assert.match(loadcSource, /Id=id,Stage="stage1"/);
 assert.match(loadcSource, /e\.MS999Chain=nil/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
 assert.match(loadcSource, /error\(\"Loader artifact unavailable\",0\)/);
 assert.match(loadcSource, /error\(\"Loader artifact integrity failed\",0\)/);
 assert.match(loadcSource, /return f\(c,\.\.\.\)/);
-assert.match(authSource, /action === 'bootstrap'/);
+assert.match(authSource, /function renderLoadcArtifact\(\)/);
+assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
 assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
 assert.match(authSource, /crypto\.randomBytes\(26\)\.toString\('hex'\)/);
 assert.match(authSource, /function createLoadaPathCapability\(\)/);
 assert.match(authSource, /const LOADA_PATH_TTL = 20 \* 1000/);
-assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap' && entry.dest === '/api/auth?action=bootstrap'), true);
+assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap'), false);
 for (const name of ['loadc', 'loader', 'sdk']) {
   assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);
 }
@@ -169,51 +169,55 @@ async function requestEndpoint(url, headers = {}) {
   return response;
 }
 
-(async () => {
-  const firstBootstrap = await requestEndpoint('/api/auth?action=bootstrap');
-  const secondBootstrap = await requestEndpoint('/api/auth?action=bootstrap');
-  assert.equal(firstBootstrap.statusCode, 200);
-  assert.equal(secondBootstrap.statusCode, 200);
-  assert.match(firstBootstrap.body.id, /^[a-f0-9]{64}$/);
-  assert.match(secondBootstrap.body.id, /^[a-f0-9]{64}$/);
-  assert.match(firstBootstrap.body.d, /^[a-f0-9]{64}$/);
-  assert.match(firstBootstrap.body.n, /^[a-f0-9]{64}$/);
-  assert.match(secondBootstrap.body.d, /^[a-f0-9]{64}$/);
-  assert.match(secondBootstrap.body.n, /^[a-f0-9]{64}$/);
-  assert.notEqual(firstBootstrap.body.id, secondBootstrap.body.id);
-  assert.notEqual(firstBootstrap.body.d, secondBootstrap.body.d);
-  assert.notEqual(firstBootstrap.body.n, secondBootstrap.body.n);
+function parseRenderedLoadc(source) {
+  const chainId = source.match(/local i="([a-f0-9]{64})"/)[1];
+  const d = source.match(/local d="([a-f0-9]{64})"/)[1];
+  const n = source.match(/local n="([a-f0-9]{64})"/)[1];
+  assert.equal(source.includes('__LOADA_D__'), false);
+  assert.equal(source.includes('__LOADA_N__'), false);
+  assert.equal(source.includes('__CHAIN_ID__'), false);
+  return { chainId, d, n };
+}
 
+(async () => {
   const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
+  const secondExecutorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
   const browserArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', { 'user-agent': 'Mozilla/5.0' });
   const robloxArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', {
     'user-agent': 'Mozilla/5.0',
     'x-client': 'rObLoX',
   });
+  assert.equal(executorArtifact.statusCode, 200);
+  assert.equal(secondExecutorArtifact.statusCode, 200);
+  assert.equal(robloxArtifact.statusCode, 200);
+  const firstLoadc = parseRenderedLoadc(executorArtifact.body);
+  const secondLoadc = parseRenderedLoadc(secondExecutorArtifact.body);
+  const robloxLoadc = parseRenderedLoadc(robloxArtifact.body);
+  assert.notEqual(firstLoadc.chainId, secondLoadc.chainId);
+  assert.notEqual(firstLoadc.d, secondLoadc.d);
+  assert.notEqual(firstLoadc.n, secondLoadc.n);
+  assert.notEqual(secondLoadc.chainId, robloxLoadc.chainId);
+
   const loadaWithoutPathToken = await requestEndpoint('/api/auth?action=artifact&name=loada', { 'X-Client': 'ROBLOX' });
-  const loadaWrongPathToken = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstBootstrap.body.d}&n=${'0'.repeat(64)}`, { 'X-Client': 'ROBLOX' });
+  const loadaWrongPathToken = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${'0'.repeat(64)}`, { 'X-Client': 'ROBLOX' });
   const loadaHeaderOnly = await requestEndpoint('/api/auth?action=artifact&name=loada', {
     'X-Client': 'ROBLOX',
     'X-999MS-Token': 'legacy-header-token-is-not-used',
   });
-  const loadaWithPathToken = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstBootstrap.body.d}&n=${firstBootstrap.body.n}`, {
+  const loadaWithPathToken = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${firstLoadc.n}`, {
     'X-Client': 'ROBLOX',
   });
-  const loadaBrowserPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstBootstrap.body.d}&n=${firstBootstrap.body.n}`, {
+  const loadaBrowserPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${firstLoadc.n}`, {
     'user-agent': 'Mozilla/5.0',
   });
   const actualNow = Date.now;
   Date.now = () => actualNow() + 20001;
-  const loadaExpiredPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstBootstrap.body.d}&n=${firstBootstrap.body.n}`, {
+  const loadaExpiredPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${firstLoadc.n}`, {
     'X-Client': 'ROBLOX',
   });
   Date.now = actualNow;
   const unknownPath = await requestEndpoint('/api/auth?action=trap');
   const robloxUnknownPath = await requestEndpoint('/api/auth?action=trap', { 'X-Roblox': 'CLIENT' });
-  assert.equal(executorArtifact.statusCode, 200);
-  assert.match(executorArtifact.body, /api\/bootstrap/);
-  assert.equal(robloxArtifact.statusCode, 200);
-  assert.match(robloxArtifact.body, /api\/bootstrap/);
   assert.equal(loadaWithoutPathToken.statusCode, 404);
   assert.equal(loadaWrongPathToken.statusCode, 404);
   assert.equal(loadaHeaderOnly.statusCode, 404);
@@ -230,7 +234,7 @@ async function requestEndpoint(url, headers = {}) {
   assert.equal(robloxUnknownPath.headers.Location, undefined);
   if (previousLoadaPathSecret === undefined) delete process.env.LOADA_PATH_SECRET;
   else process.env.LOADA_PATH_SECRET = previousLoadaPathSecret;
-  console.log('PASS 999MS Server SDK, randomized bootstrap capabilities, and browser trap tests');
+  console.log('PASS 999MS Server SDK, per-request loadc capabilities, and browser trap tests');
 })().catch((error) => {
   if (previousLoadaPathSecret === undefined) delete process.env.LOADA_PATH_SECRET;
   else process.env.LOADA_PATH_SECRET = previousLoadaPathSecret;

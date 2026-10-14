@@ -92,7 +92,7 @@ function timingSafeStringEquals(supplied, expectedValue) {
 }
 
 // LOADA_PATH_SECRET is optional when the already-required TICKET_SECRET is
-// present. Keeping the capability stateless lets a bootstrap request and its
+// present. Keeping the capability stateless lets a Stage-1 render and its
 // Stage-2 fetch land on different Vercel instances without a database.
 function loadaPathSecret() {
   const secret = process.env.LOADA_PATH_SECRET || process.env.TICKET_SECRET;
@@ -107,15 +107,15 @@ function createLoadaPathCapability() {
   const secret = loadaPathSecret();
   if (!secret) return null;
   // d is a server-fresh millisecond timestamp plus 26 cryptographically random
-  // bytes; n is a server-only HMAC of d. Both values differ on every bootstrap.
+  // bytes; n is a server-only HMAC of d. Both values differ on every Stage-1 render.
   const d = Date.now().toString(16).padStart(12, '0') +
     crypto.randomBytes(26).toString('hex');
   return { d, n: signLoadaPath(d, secret) };
 }
 
-// Stage 2 is available only at /loada.lua/<d>/<n>. d/n are minted by
-// /api/bootstrap and expire quickly. They are independent of the Roblox
-// browser-classification bypass and are verified without server-side storage.
+// Stage 2 is available only at /loada.lua/<d>/<n>. d/n are minted into each
+// server-rendered Stage 1, expire quickly, and are independent of the Roblox
+// browser-classification bypass. They are verified without server-side storage.
 function hasLoadaPathCapability(req, url) {
   const d = req.query?.d || url.searchParams.get('d');
   const n = req.query?.n || url.searchParams.get('n');
@@ -177,19 +177,7 @@ module.exports = async function handler(req, res) {
 
   if (action === 'trap') return rejectOrTrap(req, res);
 
-  // ═══ BOOTSTRAP MARK (GET) ═══
-  // This creates a fresh server-random chain identifier for Stage 1. It is
-  // not an authorization ticket; key authorization remains /api/verify.
-  if (action === 'bootstrap') {
-    if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
-    if (isBrowserRequest(req)) return trapRedirect(res);
-    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
-               req.socket?.remoteAddress || '';
-    if (!checkRateLimit(ip)) return res.status(429).json({ error: 'Rate limited' });
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return handleBootstrap(res);
-  }
+
 
   // ═══ อื่นๆ: ต้อง POST ═══
   if (req.method !== 'POST') return rejectOrTrap(req, res, 405);
@@ -233,7 +221,10 @@ function serveArtifact(req, res, name, url) {
   if (!filename) return rejectOrTrap(req, res);
   if (name === 'loada' && !hasLoadaPathCapability(req, url)) return rejectOrTrap(req, res);
   try {
-    const body = fs.readFileSync(path.join(process.cwd(), 'artifacts', filename), 'utf8');
+    const body = name === 'loadc'
+      ? renderLoadcArtifact()
+      : fs.readFileSync(path.join(process.cwd(), 'artifacts', filename), 'utf8');
+    if (typeof body !== 'string') return res.status(503).send('');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).send(body);
@@ -243,15 +234,18 @@ function serveArtifact(req, res, name, url) {
   }
 }
 
-// ═══ /api/bootstrap ═══
-function handleBootstrap(res) {
+// ═══ Dynamic Stage-1 renderer ═══
+// /loadc.lua is generated per executor request. It receives a fresh chain ID
+// and a short-lived d/n capability directly in its source, so no public
+// bootstrap endpoint is needed.
+function renderLoadcArtifact() {
   const capability = createLoadaPathCapability();
-  if (!capability) return res.status(503).json({ error: 'Unavailable' });
-  return res.status(200).json({
-    id: crypto.randomBytes(32).toString('hex'),
-    d: capability.d,
-    n: capability.n,
-  });
+  if (!capability) return null;
+  const template = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8');
+  return template
+    .replace('__LOADA_D__', capability.d)
+    .replace('__LOADA_N__', capability.n)
+    .replace('__CHAIN_ID__', crypto.randomBytes(32).toString('hex'));
 }
 
 // ═══ /api/verify ═══
