@@ -61,9 +61,21 @@ function trapRedirect(res) {
   return res.status(302).send('');
 }
 
-// ═══ Browser check ═══
+// ═══ Request classification ═══
+// Roblox executor/game requests are allowed through the browser-trap gate when
+// any header name or value contains "roblox", regardless of letter casing.
+function hasRobloxHeader(req) {
+  for (const [name, value] of Object.entries(req.headers || {})) {
+    if (`${name}:${Array.isArray(value) ? value.join(',') : value || ''}`.toLowerCase().includes('roblox')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function isBrowserRequest(req) {
   const headers = req.headers || {};
+  if (hasRobloxHeader(req)) return false;
   const ua = (headers['user-agent'] || '').toLowerCase();
 
   if (/mozilla|chrome|safari|firefox|edge|opera|msie|trident/i.test(ua)) return true;

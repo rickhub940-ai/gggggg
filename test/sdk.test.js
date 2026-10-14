@@ -158,9 +158,15 @@ async function requestEndpoint(url, headers = {}) {
 
   const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
   const browserArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', { 'user-agent': 'Mozilla/5.0' });
+  const robloxArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', {
+    'user-agent': 'Mozilla/5.0',
+    'x-client': 'rObLoX',
+  });
   const unknownPath = await requestEndpoint('/api/auth?action=trap');
   assert.equal(executorArtifact.statusCode, 200);
   assert.match(executorArtifact.body, /api\/bootstrap/);
+  assert.equal(robloxArtifact.statusCode, 200);
+  assert.match(robloxArtifact.body, /api\/bootstrap/);
   assert.equal(browserArtifact.statusCode, 302);
   assert.equal(browserArtifact.headers.Location, 'https://yura.lol/09ms');
   assert.equal(unknownPath.statusCode, 302);
