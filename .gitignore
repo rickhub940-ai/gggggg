@@ -1,5 +1,0 @@
-# Local Goofyscator macro inputs are readable, pre-obfuscation Lua and must
-# never be published or deployed. The generated Goofyscator artifacts replace
-# the corresponding tracked runtime files only after validation.
-goofyscator-input/
-goofyscator-macro-inputs.zip
