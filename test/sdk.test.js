@@ -47,6 +47,13 @@ const offsets = payloadSource.match(/local ChallengeOffsets = \{ ([^}]+) \}/)[1]
   .split(',').map((value) => Number(value.trim()));
 assert.deepEqual(multipliers.map((value, index) => [value, offsets[index]]), expectedTransforms);
 
+const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'loader.lua'), 'utf8');
+const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'payload.lua'), 'utf8');
+assert.match(loaderSource, /local Stage2WriteMonitor = getgenv\(\)\.MS999WriteMonitor/);
+assert.match(loaderSource, /RealWriteFile = type\(Stage2WriteMonitor\) == "function" and Stage2WriteMonitor/);
+assert.match(payloadLuaSource, /local Stage2WriteMonitor = getgenv\(\)\.MS999WriteMonitor/);
+assert.match(payloadLuaSource, /RealWriteFile = type\(Stage2WriteMonitor\) == "function" and Stage2WriteMonitor or writefile/);
+
 assert.equal(isValidScriptName('main'), true);
 assert.equal(isValidScriptName('main-v2_1'), true);
 assert.equal(isValidScriptName('../main'), false);

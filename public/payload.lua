@@ -32,7 +32,11 @@ if type(MS999Signal) ~= "table" then
 end
 
 -- ═══ Capture real ═══
-local RealWriteFile = writefile
+-- Stage 2 may expose its trusted write monitor through getgenv() while the
+-- executor's global writefile alias is a different reference. Prefer the
+-- Stage-2 reference so a normal executor alias split is not a false positive.
+local Stage2WriteMonitor = getgenv().MS999WriteMonitor
+local RealWriteFile = type(Stage2WriteMonitor) == "function" and Stage2WriteMonitor or writefile
 local RealIsHooked = isfunctionhooked
 local RealDebugGetInfo = debug.getinfo
 local RealHookFunction = hookfunction

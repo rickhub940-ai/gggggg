@@ -95,7 +95,12 @@ end)
 
 -- ═══ Capture real functions ═══
 local RealLoadstring = loadstring
-local RealWriteFile = writefile
+-- Stage 2 owns the writefile hook. Its reference may be exposed through
+-- getgenv() while the executor's global writefile alias is a different,
+-- equivalent reference, so capture the Stage-2 monitor first.
+local Stage2WriteMonitor = getgenv().MS999WriteMonitor
+local RealWriteFile = type(Stage2WriteMonitor) == "function" and Stage2WriteMonitor
+    or ((getgenv() and getgenv().writefile) or writefile)
 local RealReadFile = readfile
 local RealIsFile = isfile
 local RealDelfile = delfile
