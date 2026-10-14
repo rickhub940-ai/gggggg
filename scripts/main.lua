@@ -155,7 +155,8 @@ end
 --// โค้ด Blox Fruits ของคุณเริ่มตรงนี้
 --// ═══════════════════════════════════════════════════════════
 
-print("[999MS] Blox Fruits loaded!")
+print("[999MS]  loaded!")
 print("[999MS] Session: ${SERVERID}")
 
 -- โค้ดของคุ
+print("pass :} ")
