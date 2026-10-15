@@ -45,6 +45,10 @@ const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'verc
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
 const readableClientArtifacts = [
   ['loada', stageTwoSource, true, '880b8fe236f278dc90197c712c7367785d84654dc8db7fe9f8d91ee10a8e76b8'],
+  ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'), false,
+    '711aa491da8faf94670ee796ec64e2b29c02a9020a55a01d51165fc650b2a863'],
+  ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'), false,
+    'ef6214d4cf3c79f4df11155ad971223f738c7c20f6c8e699fcc75ddee3270b4e'],
   ['sdk', fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8'), false,
     '832735d60fd42710b60abfc7f2599a107388c9ae259ea75c6a9c586e5d5cebe7'],
 ];
@@ -52,30 +56,13 @@ for (const [name, source, hasStageTwoSentinel, expectedHash] of readableClientAr
   assert.ok(source.length > 1000, `${name} must not be an empty client artifact`);
   if (hasStageTwoSentinel) {
     assert.match(source, /^-- supper_Boom\n/);
-    // The only remaining -- text is the required marker comment and its
-    // matching runtime string used by the file-marker cleanup routine.
     assert.doesNotMatch(source.slice('-- supper_Boom'.length).replaceAll('"-- supper_Boom"', ''), /--/);
   } else {
     assert.doesNotMatch(source, /--/);
   }
   assert.equal(crypto.createHash('sha256').update(source).digest('hex'), expectedHash);
 }
-
-// RUNLUA remains the only client obfuscation. Its banner comment is removed;
-// these outputs use Luau compound assignments and require executor validation.
-const runLuaRuntimeArtifacts = [
-  ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'),
-    '1cebe688fbbc811681973ce0859c7b406f651c7efa1125b4d5282f98f4838026'],
-  ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'),
-    'c21ce99eb56c6152cc6df33a5b3aa60a91ebcf55a57a7640a3a2c9d9c2a53b5c'],
-];
-for (const [name, source, expectedHash] of runLuaRuntimeArtifacts) {
-  assert.ok(source.length > 1000, `${name} must not be empty`);
-  assert.match(source, /^return select\(1,function\(\.\.\.\)/);
-  assert.match(source, /(?:\+=|-=)/);
-  assert.doesNotMatch(source, /^-- This file was obfuscated/);
-  assert.equal(crypto.createHash('sha256').update(source).digest('hex'), expectedHash);
-}
+assert.doesNotMatch(mainSource, /--/);
 
 assert.equal(loadaSha, '880b8fe236f278dc90197c712c7367785d84654dc8db7fe9f8d91ee10a8e76b8');
 assert.equal(loadcSource.includes('\n'), false);
