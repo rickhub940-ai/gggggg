@@ -6,7 +6,6 @@
     }
   },
   "routes": [
-    { "src": "/loader/ride-a-pet\\.lua", "dest": "/api/auth?action=ride-loader" },
     { "src": "/payload\\.lua",       "dest": "/api/auth?action=payload" },
     { "src": "/loadc\\.lua",         "dest": "/api/auth?action=artifact&name=loadc" },
     { "src": "/loada\\.lua/([^/]+)/([^/]+)", "dest": "/api/auth?action=artifact&name=loada&d=$1&n=$2" },

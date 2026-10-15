@@ -150,13 +150,6 @@ module.exports = async function handler(req, res) {
   const url = new URL(req.url, 'http://x');
   const action = req.query?.action || url.searchParams.get('action');
 
-  // ═══ SOMTANK-STYLE BOOTSTRAP TARGET (GET) ═══
-  if (action === 'ride-loader') {
-    if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
-    if (isBrowserRequest(req)) return trapRedirect(res);
-    return serveRideLoader(res);
-  }
-
   // ═══ PAYLOAD (GET) ═══
   if (action === 'payload') {
     if (isBrowserRequest(req)) return trapRedirect(res);
@@ -223,20 +216,6 @@ module.exports = async function handler(req, res) {
   }
 };
 
-function serveRideLoader(res) {
-  try {
-    const stageTwo = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loada.lua'), 'utf8');
-    const chainId = crypto.randomBytes(32).toString('hex');
-    const prelude = `local __stEnv=(getgenv and getgenv())or _G\n__stEnv.MS999Chain=nil\n__stEnv.MS999Chain={Version="999MS-chain-v1",Id="${chainId}",Stage="stage1",UpdatedAt=tick()}\n`;
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).send(prelude + stageTwo);
-  } catch (error) {
-    console.error('[ride-loader]', error.message);
-    return res.status(404).send('Not Found');
-  }
-}
-
 function serveArtifact(req, res, name, url) {
   const filename = PUBLIC_ARTIFACTS[name];
   if (!filename) return rejectOrTrap(req, res);
@@ -260,10 +239,9 @@ function serveArtifact(req, res, name, url) {
 // and a short-lived d/n capability directly in its source, so no public
 // bootstrap endpoint is needed.
 function renderLoadcArtifact() {
-  const template = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8');
-  if (!template.includes('__LOADA_D__')) return template;
   const capability = createLoadaPathCapability();
   if (!capability) return null;
+  const template = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8');
   return template
     .replace('__LOADA_D__', capability.d)
     .replace('__LOADA_N__', capability.n)

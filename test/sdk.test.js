@@ -81,16 +81,19 @@ assert.match(loadcSource, /print\(qV\)/);
 assert.match(loadcSource, /print\(aN\)/);
 assert.match(loadcSource, /print\(xT\)/);
 assert.match(loadcSource, /print\(mK\)/);
-assert.match(loadcSource, /local gR="https:\/\/loader999ms\.vercel\.app\/loader\/ride-a-pet\.lua"\.\.'\?run='\.\.tostring\(qV\)/);
-assert.match(loadcSource, /game:HttpGet\(gR\)/);
-assert.doesNotMatch(loadcSource, /__st|__LOADA_D__|__LOADA_N__|__CHAIN_ID__|crypt\.hash|syn\.request|http_request/);
+assert.match(loadcSource, /local wC="__LOADA_D__"/);
+assert.match(loadcSource, /local hF="__LOADA_N__"/);
+assert.match(loadcSource, /local uJ="__CHAIN_ID__"/);
+assert.match(loadcSource, /local yX=gR\.\."\/loada\.lua\/"\.\.wC\.\."\/"\.\.hF\.\.'\?run='\.\.tostring\(qV\)/);
+assert.match(loadcSource, /game:HttpGet\(yX\)/);
+assert.match(loadcSource, new RegExp(`local bM="${loadaSha}"`));
+assert.doesNotMatch(loadcSource, /api\/bootstrap|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
 assert.match(loadcSource, /error\("0x4f98daf3fd5d",0\)/);
+assert.match(loadcSource, /error\("0x31d7a640f95e",0\)/);
 assert.match(loadcSource, /error\("0x75934d1098b9",0\)/);
 assert.match(loadcSource, /error\("0xc6ee23173a05",0\)/);
-assert.match(loadcSource, /return bM\(\.\.\.\)/);
-assert.match(authSource, /function serveRideLoader\(res\)/);
-assert.match(authSource, /MS999Chain=\{Version="999MS-chain-v1"/);
+assert.match(loadcSource, /return fG\(pY,\.\.\.\)/);
 
 assert.match(authSource, /function renderLoadcArtifact\(\)/);
 assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
@@ -106,8 +109,8 @@ for (const name of ['loadc', 'loader', 'sdk']) {
   assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);
 }
 assert.equal(vercelConfig.routes.some((entry) => (
-  entry.src === '/loader/ride-a-pet\\.lua' &&
-  entry.dest === '/api/auth?action=ride-loader'
+  entry.src === '/loada\\.lua/([^/]+)/([^/]+)' &&
+  entry.dest === '/api/auth?action=artifact&name=loada&d=$1&n=$2'
 )), true);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.dest === '/api/auth?action=trap'), true);
 assert.match(mainSource, /Chain\.Stage ~= "script"/);
@@ -191,6 +194,16 @@ async function requestEndpoint(url, headers = {}, method = 'GET', body = undefin
   return response;
 }
 
+function parseRenderedLoadc(source) {
+  const chainId = source.match(/local uJ="([a-f0-9]{64})"/)[1];
+  const d = source.match(/local wC="([a-f0-9]{64})"/)[1];
+  const n = source.match(/local hF="([a-f0-9]{64})"/)[1];
+  assert.equal(source.includes('__LOADA_D__'), false);
+  assert.equal(source.includes('__LOADA_N__'), false);
+  assert.equal(source.includes('__CHAIN_ID__'), false);
+  return { chainId, d, n };
+}
+
 (async () => {
   // This succeeds without a preceding in-memory /api/script session. It proves
   // runtime verification is portable across independent Vercel instances.
@@ -227,28 +240,42 @@ async function requestEndpoint(url, headers = {}, method = 'GET', body = undefin
   assert.equal(mismatchedRuntime.statusCode, 403);
   assert.equal(mismatchedRuntime.body.diagnostic, 'D2_SECRET_MISMATCH');
 
-  const staticLoadc = await requestEndpoint('/api/auth?action=artifact&name=loadc');
-  assert.equal(staticLoadc.statusCode, 200);
-  assert.equal(staticLoadc.body, loadcSource);
-
-  const rideArtifact = await requestEndpoint('/api/auth?action=ride-loader');
-  const secondRideArtifact = await requestEndpoint('/api/auth?action=ride-loader');
-  const browserRide = await requestEndpoint('/api/auth?action=ride-loader', { 'user-agent': 'Mozilla/5.0' });
-  const robloxRide = await requestEndpoint('/api/auth?action=ride-loader', {
+  const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
+  const secondExecutorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
+  const browserArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', { 'user-agent': 'Mozilla/5.0' });
+  const robloxArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', {
     'user-agent': 'Mozilla/5.0', 'x-client': 'rObLoX',
   });
-  assert.equal(rideArtifact.statusCode, 200);
-  assert.equal(secondRideArtifact.statusCode, 200);
-  assert.equal(robloxRide.statusCode, 200);
-  assert.match(rideArtifact.body, /^local __stEnv=\(getgenv and getgenv\(\)\)or _G/);
-  assert.match(rideArtifact.body, /MS999Chain=\{Version="999MS-chain-v1",Id="[a-f0-9]{64}",Stage="stage1"/);
-  assert.match(rideArtifact.body, /-- supper_Boom/);
-  assert.notEqual(rideArtifact.body.slice(0, 200), secondRideArtifact.body.slice(0, 200));
-  assert.equal(browserRide.statusCode, 302);
-  assert.equal(browserRide.headers.Location, 'https://yura.lol/09ms');
+  assert.equal(executorArtifact.statusCode, 200);
+  assert.equal(secondExecutorArtifact.statusCode, 200);
+  assert.equal(robloxArtifact.statusCode, 200);
+  const firstLoadc = parseRenderedLoadc(executorArtifact.body);
+  const secondLoadc = parseRenderedLoadc(secondExecutorArtifact.body);
+  const robloxLoadc = parseRenderedLoadc(robloxArtifact.body);
+  assert.notEqual(firstLoadc.chainId, secondLoadc.chainId);
+  assert.notEqual(firstLoadc.d, secondLoadc.d);
+  assert.notEqual(firstLoadc.n, secondLoadc.n);
+  assert.notEqual(secondLoadc.chainId, robloxLoadc.chainId);
 
+  const loadaWithoutPathToken = await requestEndpoint('/api/auth?action=artifact&name=loada', { 'X-Client': 'ROBLOX' });
+  const loadaWrongPathToken = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${'0'.repeat(64)}`, { 'X-Client': 'ROBLOX' });
+  const loadaWithPathToken = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${firstLoadc.n}`, { 'X-Client': 'ROBLOX' });
+  const loadaBrowserPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${firstLoadc.n}`, { 'user-agent': 'Mozilla/5.0' });
+  const actualNow = Date.now;
+  Date.now = () => actualNow() + 20001;
+  const loadaExpiredPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${firstLoadc.n}`, { 'X-Client': 'ROBLOX' });
+  Date.now = actualNow;
   const unknownPath = await requestEndpoint('/api/auth?action=trap');
   const robloxUnknownPath = await requestEndpoint('/api/auth?action=trap', { 'X-Roblox': 'CLIENT' });
+  assert.equal(loadaWithoutPathToken.statusCode, 404);
+  assert.equal(loadaWrongPathToken.statusCode, 404);
+  assert.equal(loadaWithPathToken.statusCode, 200);
+  assert.match(loadaWithPathToken.body, /^-- supper_Boom/);
+  assert.equal(loadaBrowserPath.statusCode, 302);
+  assert.equal(loadaBrowserPath.headers.Location, 'https://yura.lol/09ms');
+  assert.equal(loadaExpiredPath.statusCode, 404);
+  assert.equal(browserArtifact.statusCode, 302);
+  assert.equal(browserArtifact.headers.Location, 'https://yura.lol/09ms');
   assert.equal(unknownPath.statusCode, 302);
   assert.equal(unknownPath.headers.Location, 'https://yura.lol/09ms');
   assert.equal(robloxUnknownPath.statusCode, 404);

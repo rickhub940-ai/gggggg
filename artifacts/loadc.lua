@@ -10,17 +10,43 @@ print(aN)
 print(xT)
 print(mK)
 
-local gR="https://loader999ms.vercel.app/loader/ride-a-pet.lua"..'?run='..tostring(qV)
-local pY,wC=pcall(function() return game:HttpGet(gR) end)
+local gR="https://loader999ms.vercel.app"
+local pY={gR,"/loada.lua","999MS-chain-v1","lite",true}
+local wC="__LOADA_D__"
+local hF="__LOADA_N__"
+local uJ="__CHAIN_ID__"
+local bM="1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d"
+local kL=(getgenv and getgenv())or _G
 
-if not pY or type(wC)~='string' or wC=='' then error("0x4f98daf3fd5d",0) end
+if not uJ:match("^[a-f0-9]+$")or #uJ~=64 then error("0x2b6e39f1a442",0)end
+kL.MS999Chain=nil
+kL.MS999Chain={Version="999MS-chain-v1",Id=uJ,Stage="stage1",UpdatedAt=tick()}
 
-local hF=loadstring or load
+local yX=gR.."/loada.lua/"..wC.."/"..hF..'?run='..tostring(qV)
+local rP,tD=pcall(function() return game:HttpGet(yX) end)
 
-if type(hF)~='function' then error("0x75934d1098b9",0) end
+if not rP or type(tD)~='string' or tD=='' then
+    kL.MS999Chain=nil
+    error("0x4f98daf3fd5d",0)
+end
 
-local uJ,bM=pcall(hF,wC)
+local nS=(kL and kL.crypt)or crypt
+local vE,zQ=pcall(type(nS)=="table"and nS.hash or nil,tD,"sha256")
+if not vE or type(zQ)~="string"or string.lower(zQ)~=bM then
+    kL.MS999Chain=nil
+    error("0x31d7a640f95e",0)
+end
 
-if not uJ or type(bM)~='function' then error("0xc6ee23173a05",0) end
+local cA=loadstring or load
+if type(cA)~='function' then
+    kL.MS999Chain=nil
+    error("0x75934d1098b9",0)
+end
 
-return bM(...)
+local oW,fG=pcall(cA,tD)
+if not oW or type(fG)~='function' then
+    kL.MS999Chain=nil
+    error("0xc6ee23173a05",0)
+end
+
+return fG(pY,...)
