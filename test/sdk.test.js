@@ -46,7 +46,6 @@ const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.l
 const goofyscatorClientArtifacts = [
   ['loada', stageTwoSource, true],
   ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'), false],
-  ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'), false],
   ['sdk', fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8'), false],
 ];
 
@@ -56,6 +55,15 @@ for (const [name, source, hasStageTwoSentinel] of goofyscatorClientArtifacts) {
   assert.match(source, /-- This file is protected by goofyscator V11 BETA-1/);
   assert.doesNotMatch(source, /GUF_(?:NO_VIRTUALIZE|JIT|JIT_MAX|CRASH|ENCFUNC|ENCSTR)\s*\(/);
 }
+
+// Goofyscator's payload VM fails to compile in the target executor. Keep the
+// other Goofy stages intact and use the known-compatible WAD payload instead.
+const payloadSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
+assert.ok(payloadSource.length > 1000, 'payload must not be empty');
+assert.match(payloadSource, /^--\[\[ v1\.0\.0 https:\/\/wearedevs\.net\/obfuscator \]\]/);
+assert.doesNotMatch(payloadSource, /goofyscator V11 BETA-1/);
+assert.equal(crypto.createHash('sha256').update(payloadSource).digest('hex'),
+  'ee825ee5b90c2ac5526b3349e4c7c7a30f7b7ae3cdd1fe8cca7e60fdb1a1b02c');
 
 assert.equal(loadaSha, 'e12cc24ee7e6905f11303b5b7530ff3740ff1442c071218c512cfc1a00901f6c');
 assert.equal(loadcSource.includes('\n'), false);
