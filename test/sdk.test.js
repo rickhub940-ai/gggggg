@@ -73,25 +73,25 @@ assert.doesNotMatch(mainSource, /--/);
 
 assert.equal(loadaSha, '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d');
 assert.match(loadcSource, /if not game:IsLoaded\(\) then game.Loaded:Wait\(\) end/);
-assert.match(loadcSource, /local qV=os\.clock\(\)/);
-assert.match(loadcSource, /local aN=os\.time\(\)/);
-assert.match(loadcSource, /local xT=os\.date\("\*t"\)/);
-assert.match(loadcSource, /local mK=os\.difftime\(aN,aN-1\)/);
-assert.match(loadcSource, /local sE=table\.concat\(\{tostring\(aN\),tostring\(xT\.year\),tostring\(xT\.yday\),tostring\(xT\.hour\),tostring\(xT\.min\),tostring\(xT\.sec\),tostring\(mK\)\},"-"\)/);
+assert.match(loadcSource, /local __CLOCK__=os\.clock\(\)/);
+assert.match(loadcSource, /local __TIME__=os\.time\(\)/);
+assert.match(loadcSource, /local __DATE__=os\.date\("\*t"\)/);
+assert.match(loadcSource, /local __DIFF__=os\.difftime\(__TIME__,__TIME__-1\)/);
+assert.match(loadcSource, /local __STAMP__=table\.concat\(\{tostring\(__TIME__\),tostring\(__DATE__\.year\),tostring\(__DATE__\.yday\),tostring\(__DATE__\.hour\),tostring\(__DATE__\.min\),tostring\(__DATE__\.sec\),tostring\(__DIFF__\)\},"-"\)/);
 assert.doesNotMatch(loadcSource, /\bprint\s*\(/);
-assert.match(loadcSource, /local wC="__LOADA_D__"/);
-assert.match(loadcSource, /local hF="__LOADA_N__"/);
-assert.match(loadcSource, /local uJ="__CHAIN_ID__"/);
-assert.match(loadcSource, /local yX=gR\.\."\/loada\.lua\/"\.\.wC\.\."\/"\.\.hF\.\.'\?run='\.\.tostring\(qV\)\.\.'&stamp='\.\.sE/);
-assert.match(loadcSource, /game:HttpGet\(yX\)/);
-assert.match(loadcSource, new RegExp(`local bM="${loadaSha}"`));
+assert.match(loadcSource, /local __D__="__LOADA_D__"/);
+assert.match(loadcSource, /local __N__="__LOADA_N__"/);
+assert.match(loadcSource, /local __ID__="__CHAIN_ID__"/);
+assert.match(loadcSource, /local __URL__=__BASE__\.\."\/loada\.lua\/"\.\.__D__\.\."\/"\.\.__N__\.\.'\?run='\.\.tostring\(__CLOCK__\)\.\.'&stamp='\.\.__STAMP__/);
+assert.match(loadcSource, /game:HttpGet\(__URL__\)/);
+assert.match(loadcSource, new RegExp(`local __HASH__="${loadaSha}"`));
 assert.doesNotMatch(loadcSource, /api\/bootstrap|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
 assert.match(loadcSource, /error\("0x4f98daf3fd5d",0\)/);
 assert.match(loadcSource, /error\("0x31d7a640f95e",0\)/);
 assert.match(loadcSource, /error\("0x75934d1098b9",0\)/);
 assert.match(loadcSource, /error\("0xc6ee23173a05",0\)/);
-assert.match(loadcSource, /return fG\(pY,\.\.\.\)/);
+assert.match(loadcSource, /return __FUNCTION__\(__ARGS__,\.\.\.\)/);
 
 assert.match(authSource, /function renderLoadcArtifact\(\)/);
 assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
@@ -193,13 +193,25 @@ async function requestEndpoint(url, headers = {}, method = 'GET', body = undefin
 }
 
 function parseRenderedLoadc(source) {
-  const chainId = source.match(/local uJ="([a-f0-9]{64})"/)[1];
-  const d = source.match(/local wC="([a-f0-9]{64})"/)[1];
-  const n = source.match(/local hF="([a-f0-9]{64})"/)[1];
+  const localValues = new Map([...source.matchAll(/local ([a-z])="([a-f0-9]{64})"/g)]
+    .map((match) => [match[1], match[2]]));
+  const chainVariable = source.match(/MS999Chain=\{Version="999MS-chain-v1",Id=([a-z]),Stage="stage1"/)[1];
+  const pathVariables = source.match(/\/loada\.lua\/"\.\.([a-z])\.\."\/"\.\.([a-z])\.\.'\?run='/);
+  const chainId = localValues.get(chainVariable);
+  const d = localValues.get(pathVariables[1]);
+  const n = localValues.get(pathVariables[2]);
+  assert.match(chainId, /^[a-f0-9]{64}$/);
+  assert.match(d, /^[a-f0-9]{64}$/);
+  assert.match(n, /^[a-f0-9]{64}$/);
   assert.equal(source.includes('__LOADA_D__'), false);
   assert.equal(source.includes('__LOADA_N__'), false);
   assert.equal(source.includes('__CHAIN_ID__'), false);
-  return { chainId, d, n };
+  assert.equal(source.includes('__CLOCK__'), false);
+  const localNames = [...source.matchAll(/local ([a-z](?:,[a-z])*)=/g)]
+    .flatMap((match) => match[1].split(','));
+  assert.ok(localNames.length >= 20);
+  assert.equal(new Set(localNames).size, localNames.length);
+  return { chainId, d, n, localNames };
 }
 
 (async () => {
@@ -253,6 +265,8 @@ function parseRenderedLoadc(source) {
   assert.notEqual(firstLoadc.chainId, secondLoadc.chainId);
   assert.notEqual(firstLoadc.d, secondLoadc.d);
   assert.notEqual(firstLoadc.n, secondLoadc.n);
+  assert.notDeepEqual(firstLoadc.localNames, secondLoadc.localNames);
+  assert.notDeepEqual(secondLoadc.localNames, robloxLoadc.localNames);
   assert.notEqual(secondLoadc.chainId, robloxLoadc.chainId);
 
   const loadaWithoutPathToken = await requestEndpoint('/api/auth?action=artifact&name=loada', { 'X-Client': 'ROBLOX' });

@@ -238,14 +238,36 @@ function serveArtifact(req, res, name, url) {
 // /loadc.lua is generated per executor request. It receives a fresh chain ID
 // and a short-lived d/n capability directly in its source, so no public
 // bootstrap endpoint is needed.
+const LOADC_VARIABLE_TOKENS = Object.freeze([
+  '__CLOCK__', '__TIME__', '__DATE__', '__DIFF__', '__STAMP__',
+  '__BASE__', '__ARGS__', '__D__', '__N__', '__ID__', '__HASH__', '__ENV__',
+  '__URL__', '__FETCHED__', '__BODY__', '__CRYPTO__', '__HASHED__', '__DIGEST__',
+  '__LOADER__', '__EXECUTED__', '__FUNCTION__',
+]);
+const LOADC_SHORT_IDENTIFIERS = Object.freeze('abcdefghijklmnopqrstuvwxyz'.split(''));
+
+function shuffledLoadcIdentifiers() {
+  const names = [...LOADC_SHORT_IDENTIFIERS];
+  for (let index = names.length - 1; index > 0; index -= 1) {
+    const swapIndex = crypto.randomInt(index + 1);
+    [names[index], names[swapIndex]] = [names[swapIndex], names[index]];
+  }
+  return names.slice(0, LOADC_VARIABLE_TOKENS.length);
+}
+
 function renderLoadcArtifact() {
   const capability = createLoadaPathCapability();
   if (!capability) return null;
-  const template = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8');
-  return template
-    .replace('__LOADA_D__', capability.d)
-    .replace('__LOADA_N__', capability.n)
-    .replace('__CHAIN_ID__', crypto.randomBytes(32).toString('hex'));
+  const substitutions = new Map([
+    ['__LOADA_D__', capability.d],
+    ['__LOADA_N__', capability.n],
+    ['__CHAIN_ID__', crypto.randomBytes(32).toString('hex')],
+  ]);
+  const identifiers = shuffledLoadcIdentifiers();
+  LOADC_VARIABLE_TOKENS.forEach((token, index) => substitutions.set(token, identifiers[index]));
+  let body = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8');
+  for (const [token, value] of substitutions) body = body.replaceAll(token, value);
+  return body;
 }
 
 // ═══ /api/verify ═══
