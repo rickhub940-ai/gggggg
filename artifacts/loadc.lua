@@ -4,11 +4,7 @@ local qV=os.clock()
 local aN=os.time()
 local xT=os.date("*t")
 local mK=os.difftime(aN,aN-1)
-
-print(qV)
-print(aN)
-print(xT)
-print(mK)
+local sE=table.concat({tostring(aN),tostring(xT.year),tostring(xT.yday),tostring(xT.hour),tostring(xT.min),tostring(xT.sec),tostring(mK)},"-")
 
 local gR="https://loader999ms.vercel.app"
 local pY={gR,"/loada.lua","999MS-chain-v1","lite",true}
@@ -22,7 +18,7 @@ if not uJ:match("^[a-f0-9]+$")or #uJ~=64 then error("0x2b6e39f1a442",0)end
 kL.MS999Chain=nil
 kL.MS999Chain={Version="999MS-chain-v1",Id=uJ,Stage="stage1",UpdatedAt=tick()}
 
-local yX=gR.."/loada.lua/"..wC.."/"..hF..'?run='..tostring(qV)
+local yX=gR.."/loada.lua/"..wC.."/"..hF..'?run='..tostring(qV)..'&stamp='..sE
 local rP,tD=pcall(function() return game:HttpGet(yX) end)
 
 if not rP or type(tD)~='string' or tD=='' then
