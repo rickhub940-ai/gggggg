@@ -1,1 +1,42 @@
-local b="https://keysytemdemo.vercel.app";local c={b,"/loada.lua","999MS-chain-v1","lite",true};local d="__LOADA_D__";local n="__LOADA_N__";local i="__CHAIN_ID__";local u=b.."/loada.lua/"..d.."/"..n;local h="1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d";local v="999MS-chain-v1";if not game:IsLoaded()then game.Loaded:Wait()end;local e=(getgenv and getgenv())or _G;e.MS999Chain=nil;if not i:match("^[a-f0-9]+$")or#i~=64 then error("Loader chain unavailable",0)end;e.MS999Chain={Version=v,Id=i,Stage="stage1",UpdatedAt=tick()};local R=(syn and syn.request)or(http and http.request)or request or http_request;if type(R)~="function"then e.MS999Chain=nil;error("Loader request unavailable",0)end;local q,s=pcall(R,{Url=u,Method="GET",Headers={["X-Client"]="Roblox"}});local w=q and type(s)=="table"and s.Body or nil;if type(w)~="string"or w==""then e.MS999Chain=nil;error("Loader artifact unavailable",0)end;local x=e and e.crypt or crypt;local k,g=pcall(type(x)=="table"and x.hash or nil,w,"sha256");if not k or type(g)~="string"or string.lower(g)~=h then e.MS999Chain=nil;error("Loader artifact integrity failed",0)end;local l=loadstring or load;local f,z=l(w);if type(f)~="function"then e.MS999Chain=nil;error(z or "Loader artifact compile failed",0)end;return f(c,...)
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+local __stBase="https://keysytemdemo.vercel.app"
+local __stConfig={__stBase,"/loada.lua","999MS-chain-v1","lite",true}
+local __stD="__LOADA_D__"
+local __stN="__LOADA_N__"
+local __stChainId="__CHAIN_ID__"
+local __stExpectedHash="1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d"
+local __stEnv=(getgenv and getgenv())or _G
+
+if not __stChainId:match("^[a-f0-9]+$")or #__stChainId~=64 then error("0x2b6e39f1a442",0)end
+__stEnv.MS999Chain=nil
+__stEnv.MS999Chain={Version="999MS-chain-v1",Id=__stChainId,Stage="stage1",UpdatedAt=tick()}
+
+local __stRunUrl=__stBase.."/loada.lua/"..__stD.."/"..__stN..'?run='..tostring(os.clock())
+local __stRequestOk,__stSource=pcall(function()return game:HttpGet(__stRunUrl)end)
+
+if not __stRequestOk or type(__stSource)~="string"or __stSource==""then
+    __stEnv.MS999Chain=nil
+    error("0x4f98daf3fd5d",0)
+end
+
+local __stCrypt=(__stEnv and __stEnv.crypt)or crypt
+local __stHashOk,__stHash=pcall(type(__stCrypt)=="table"and __stCrypt.hash or nil,__stSource,"sha256")
+if not __stHashOk or type(__stHash)~="string"or string.lower(__stHash)~=__stExpectedHash then
+    __stEnv.MS999Chain=nil
+    error("0x31d7a640f95e",0)
+end
+
+local __stLoad=loadstring or load
+if type(__stLoad)~="function"then
+    __stEnv.MS999Chain=nil
+    error("0x75934d1098b9",0)
+end
+
+local __stCompileOk,__stChunk=pcall(__stLoad,__stSource)
+if not __stCompileOk or type(__stChunk)~="function"then
+    __stEnv.MS999Chain=nil
+    error("0xc6ee23173a05",0)
+end
+
+return __stChunk(__stConfig,...)

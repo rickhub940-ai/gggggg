@@ -72,19 +72,19 @@ for (const [name, source, expectedHash] of runLuaRuntimeArtifacts) {
 assert.doesNotMatch(mainSource, /--/);
 
 assert.equal(loadaSha, '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d');
-assert.equal(loadcSource.includes('\n'), false);
-assert.match(loadcSource, /local d="__LOADA_D__"/);
-assert.match(loadcSource, /local n="__LOADA_N__"/);
-assert.match(loadcSource, /local i="__CHAIN_ID__"/);
-assert.match(loadcSource, /local u=b\.\."\/loada\.lua\/"\.\.d\.\."\/"\.\.n/);
-assert.doesNotMatch(loadcSource, /api\/bootstrap|game:HttpGet|X-999MS-Token/);
-assert.match(loadcSource, new RegExp(`local h=\\"${loadaSha}\\"`));
-assert.doesNotMatch(loadcSource, /LOADA_ARTIFACT_TOKEN|dae7f78cb31c846b50b01d3866ff0f2266d08ee89453ed6aea20eea46131ae6b/);
-assert.match(loadcSource, /e\.MS999Chain=nil/);
+assert.match(loadcSource, /if not game:IsLoaded\(\) then game.Loaded:Wait\(\) end/);
+assert.match(loadcSource, /local __stD="__LOADA_D__"/);
+assert.match(loadcSource, /local __stN="__LOADA_N__"/);
+assert.match(loadcSource, /local __stChainId="__CHAIN_ID__"/);
+assert.match(loadcSource, /local __stRunUrl=__stBase\.\."\/loada\.lua\/"\.\.__stD\.\."\/"\.\.__stN\.\.'\?run='\.\.tostring\(os\.clock\(\)\)/);
+assert.match(loadcSource, /game:HttpGet\(__stRunUrl\)/);
+assert.match(loadcSource, new RegExp(`local __stExpectedHash="${loadaSha}"`));
+assert.doesNotMatch(loadcSource, /api\/bootstrap|X-999MS-Token|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
-assert.match(loadcSource, /error\(\"Loader artifact unavailable\",0\)/);
-assert.match(loadcSource, /error\(\"Loader artifact integrity failed\",0\)/);
-assert.match(loadcSource, /return f\(c,\.\.\.\)/);
+assert.match(loadcSource, /error\("0x4f98daf3fd5d",0\)/);
+assert.match(loadcSource, /error\("0x75934d1098b9",0\)/);
+assert.match(loadcSource, /error\("0xc6ee23173a05",0\)/);
+assert.match(loadcSource, /return __stChunk\(__stConfig,\.\.\.\)/);
 assert.match(authSource, /function renderLoadcArtifact\(\)/);
 assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
 assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
@@ -185,9 +185,9 @@ async function requestEndpoint(url, headers = {}, method = 'GET', body = undefin
 }
 
 function parseRenderedLoadc(source) {
-  const chainId = source.match(/local i="([a-f0-9]{64})"/)[1];
-  const d = source.match(/local d="([a-f0-9]{64})"/)[1];
-  const n = source.match(/local n="([a-f0-9]{64})"/)[1];
+  const chainId = source.match(/local __stChainId="([a-f0-9]{64})"/)[1];
+  const d = source.match(/local __stD="([a-f0-9]{64})"/)[1];
+  const n = source.match(/local __stN="([a-f0-9]{64})"/)[1];
   assert.equal(source.includes('__LOADA_D__'), false);
   assert.equal(source.includes('__LOADA_N__'), false);
   assert.equal(source.includes('__CHAIN_ID__'), false);
