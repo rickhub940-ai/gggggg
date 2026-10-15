@@ -81,6 +81,7 @@ assert.match(loadcSource, /MS999:S1:E02:HTTP_GET_FAILED/);
 assert.match(loadcSource, /MS999:S1:E03:SHA256_MISMATCH/);
 assert.match(loadcSource, /MS999:S1:E04:LOADER_UNAVAILABLE/);
 assert.match(loadcSource, /MS999:S1:E05:STAGE2_COMPILE_FAILED/);
+assert.match(loadcSource, /xpcall\(function\(\) return game:HttpGet\(@m@\)end,@2@\)/);
 assert.match(loadcSource, /return @u@\(@g@,\.\.\.\)/);
 assert.doesNotMatch(loadcSource, /api\/bootstrap|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
@@ -88,6 +89,9 @@ assert.match(authSource, /function renderLoadcArtifact\(\)/);
 assert.match(authSource, /const LOADC_PRELUDE_LINES/);
 assert.match(authSource, /const LOADC_SETUP_BLOCKS/);
 assert.match(authSource, /function shuffled\(items\)/);
+assert.match(authSource, /os\.tick or tick/);
+assert.match(authSource, /table\.freeze/);
+assert.match(authSource, /debug and debug\.traceback/);
 assert.match(authSource, /MS999:S1:E01:CHAIN_ID_INVALID/);
 
 assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
@@ -205,6 +209,13 @@ function parseRenderedLoadc(source) {
   assert.equal(source.includes('@a@'), false);
   assert.equal(source.includes('@y@'), false);
   assert.equal(source.includes('@z@'), false);
+  assert.equal(source.includes('@0@'), false);
+  assert.equal(source.includes('@1@'), false);
+  assert.equal(source.includes('@2@'), false);
+  assert.match(source, /xpcall\(function\(\) return game:HttpGet\([a-z]\)end,[a-z]\)/);
+  assert.ok(source.includes('os.tick or tick'));
+  assert.ok(source.includes('table.freeze'));
+  assert.ok(source.includes('debug and debug.traceback'));
   assert.doesNotMatch(source, /0x[0-9a-f]+/i);
   for (const diagnostic of [
     'MS999:S1:E01:CHAIN_ID_INVALID',
@@ -215,7 +226,7 @@ function parseRenderedLoadc(source) {
   ]) assert.ok(source.includes(diagnostic), `missing ${diagnostic}`);
   const localNames = [...source.matchAll(/local ([a-z](?:,[a-z])*)=/g)]
     .flatMap((match) => match[1].split(','));
-  assert.ok(localNames.length >= 20);
+  assert.ok(localNames.length >= 24);
   assert.equal(new Set(localNames).size, localNames.length);
   const positions = [
     ['clock', source.indexOf('=os.clock()')],

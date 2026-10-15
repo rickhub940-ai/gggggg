@@ -242,7 +242,7 @@ const LOADC_VARIABLE_TOKENS = Object.freeze([
   '@a@', '@b@', '@c@', '@d@', '@e@',
   '@f@', '@g@', '@h@', '@i@', '@j@', '@k@', '@l@',
   '@m@', '@n@', '@o@', '@p@', '@q@', '@r@',
-  '@s@', '@t@', '@u@',
+  '@s@', '@t@', '@u@', '@0@', '@1@', '@2@',
 ]);
 const LOADC_SHORT_IDENTIFIERS = Object.freeze('abcdefghijklmnopqrstuvwxyz'.split(''));
 const LOADC_PRELUDE_LINES = Object.freeze([
@@ -259,10 +259,13 @@ const LOADC_PRELUDE_LINES = Object.freeze([
 let lastLoadcLayout = '';
 const LOADC_SETUP_BLOCKS = Object.freeze([
   [
+    'local @0@=(os.tick or tick)()',
+    'local @1@=(table.freeze and table.freeze({c=@a@,t=@0@}))or{c=@a@,t=@0@}',
     'local @d@=os.difftime(@b@,@b@-1)',
-    'local @e@=table.concat({tostring(@b@),tostring(@c@.year),tostring(@c@.yday),tostring(@c@.hour),tostring(@c@.min),tostring(@c@.sec),tostring(@d@)},"-")',
+    'local @e@=table.concat({tostring(@1@.c),tostring(@b@),tostring(@c@.year),tostring(@c@.yday),tostring(@c@.hour),tostring(@c@.min),tostring(@c@.sec),tostring(@1@.t),tostring(@d@)},"-")',
   ].join('\n'),
   'local @g@={@f@,"/loada.lua","999MS-chain-v1","lite",true}',
+  'local @2@=(debug and debug.traceback)or function(@2@)return @2@ end',
   [
     'if not @j@:match("^[a-f0-9]+$")or #@j@~=64 then error("MS999:S1:E01:CHAIN_ID_INVALID",0)end',
     '@l@.MS999Chain=nil',

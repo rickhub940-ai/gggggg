@@ -5,7 +5,7 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 @z@
 
 local @m@=@f@.."/loada.lua/"..@h@.."/"..@i@..'?run='..tostring(@a@)..'&stamp='..@e@
-local @n@,@o@=pcall(function() return game:HttpGet(@m@) end)
+local @n@,@o@=xpcall(function() return game:HttpGet(@m@)end,@2@)
 
 if not @n@ or type(@o@)~='string' or @o@=='' then
     @l@.MS999Chain=nil
