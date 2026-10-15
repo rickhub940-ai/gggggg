@@ -73,14 +73,22 @@ assert.doesNotMatch(mainSource, /--/);
 
 assert.equal(loadaSha, '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d');
 assert.match(loadcSource, /if not game:IsLoaded\(\) then game.Loaded:Wait\(\) end/);
-assert.match(loadcSource, /local __stRunUrl="https:\/\/loader999ms\.vercel\.app\/loader\/ride-a-pet\.lua"\.\.'\?run='\.\.tostring\(os\.clock\(\)\)/);
-assert.match(loadcSource, /game:HttpGet\(__stRunUrl\)/);
-assert.doesNotMatch(loadcSource, /__LOADA_D__|__LOADA_N__|__CHAIN_ID__|crypt\.hash|syn\.request|http_request/);
+assert.match(loadcSource, /local qV=os\.clock\(\)/);
+assert.match(loadcSource, /local aN=os\.time\(\)/);
+assert.match(loadcSource, /local xT=os\.date\("\*t"\)/);
+assert.match(loadcSource, /local mK=os\.difftime\(aN,aN-1\)/);
+assert.match(loadcSource, /print\(qV\)/);
+assert.match(loadcSource, /print\(aN\)/);
+assert.match(loadcSource, /print\(xT\)/);
+assert.match(loadcSource, /print\(mK\)/);
+assert.match(loadcSource, /local gR="https:\/\/loader999ms\.vercel\.app\/loader\/ride-a-pet\.lua"\.\.'\?run='\.\.tostring\(qV\)/);
+assert.match(loadcSource, /game:HttpGet\(gR\)/);
+assert.doesNotMatch(loadcSource, /__st|__LOADA_D__|__LOADA_N__|__CHAIN_ID__|crypt\.hash|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
 assert.match(loadcSource, /error\("0x4f98daf3fd5d",0\)/);
 assert.match(loadcSource, /error\("0x75934d1098b9",0\)/);
 assert.match(loadcSource, /error\("0xc6ee23173a05",0\)/);
-assert.match(loadcSource, /return __stChunk\(\.\.\.\)/);
+assert.match(loadcSource, /return bM\(\.\.\.\)/);
 assert.match(authSource, /function serveRideLoader\(res\)/);
 assert.match(authSource, /MS999Chain=\{Version="999MS-chain-v1"/);
 
