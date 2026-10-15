@@ -43,28 +43,35 @@ const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', '
 const loadaSha = crypto.createHash('sha256').update(stageTwoSource).digest('hex');
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-const readableClientArtifacts = [
-  ['loada', stageTwoSource, true, '880b8fe236f278dc90197c712c7367785d84654dc8db7fe9f8d91ee10a8e76b8'],
-  ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'), false,
-    '711aa491da8faf94670ee796ec64e2b29c02a9020a55a01d51165fc650b2a863'],
-  ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'), false,
-    'ef6214d4cf3c79f4df11155ad971223f738c7c20f6c8e699fcc75ddee3270b4e'],
+const goofyscatorClientArtifacts = [
+  ['loada', stageTwoSource, true, '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d'],
   ['sdk', fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8'), false,
-    '832735d60fd42710b60abfc7f2599a107388c9ae259ea75c6a9c586e5d5cebe7'],
+    '6c82e1714a0aafd562ccaed8545d670612297f89ea1c8344f19ffe4bc0b88a39'],
 ];
-for (const [name, source, hasStageTwoSentinel, expectedHash] of readableClientArtifacts) {
+for (const [name, source, hasStageTwoSentinel, expectedHash] of goofyscatorClientArtifacts) {
   assert.ok(source.length > 1000, `${name} must not be an empty client artifact`);
-  if (hasStageTwoSentinel) {
-    assert.match(source, /^-- supper_Boom\n/);
-    assert.doesNotMatch(source.slice('-- supper_Boom'.length).replaceAll('"-- supper_Boom"', ''), /--/);
-  } else {
-    assert.doesNotMatch(source, /--/);
-  }
+  if (hasStageTwoSentinel) assert.match(source, /^-- supper_Boom\nreturn \(/);
+  else assert.match(source, /^return \(/);
+  assert.doesNotMatch(source, /^-- This file is protected by goofyscator/m);
+  assert.equal(crypto.createHash('sha256').update(source).digest('hex'), expectedHash);
+}
+
+const runLuaRuntimeArtifacts = [
+  ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'),
+    '1cebe688fbbc811681973ce0859c7b406f651c7efa1125b4d5282f98f4838026'],
+  ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'),
+    'c21ce99eb56c6152cc6df33a5b3aa60a91ebcf55a57a7640a3a2c9d9c2a53b5c'],
+];
+for (const [name, source, expectedHash] of runLuaRuntimeArtifacts) {
+  assert.ok(source.length > 1000, `${name} must not be empty`);
+  assert.match(source, /^return select\(1,function\(\.\.\.\)/);
+  assert.match(source, /(?:\+=|-=)/);
+  assert.doesNotMatch(source, /^-- This file was obfuscated with RUNLUA/m);
   assert.equal(crypto.createHash('sha256').update(source).digest('hex'), expectedHash);
 }
 assert.doesNotMatch(mainSource, /--/);
 
-assert.equal(loadaSha, '880b8fe236f278dc90197c712c7367785d84654dc8db7fe9f8d91ee10a8e76b8');
+assert.equal(loadaSha, '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /local d="__LOADA_D__"/);
 assert.match(loadcSource, /local n="__LOADA_N__"/);
