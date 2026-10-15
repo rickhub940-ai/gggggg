@@ -219,6 +219,10 @@ async function requestEndpoint(url, headers = {}, method = 'GET', body = undefin
   assert.equal(mismatchedRuntime.statusCode, 403);
   assert.equal(mismatchedRuntime.body.diagnostic, 'D2_SECRET_MISMATCH');
 
+  const staticLoadc = await requestEndpoint('/api/auth?action=artifact&name=loadc');
+  assert.equal(staticLoadc.statusCode, 200);
+  assert.equal(staticLoadc.body, loadcSource);
+
   const rideArtifact = await requestEndpoint('/api/auth?action=ride-loader');
   const secondRideArtifact = await requestEndpoint('/api/auth?action=ride-loader');
   const browserRide = await requestEndpoint('/api/auth?action=ride-loader', { 'user-agent': 'Mozilla/5.0' });

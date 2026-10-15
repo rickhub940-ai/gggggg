@@ -260,9 +260,10 @@ function serveArtifact(req, res, name, url) {
 // and a short-lived d/n capability directly in its source, so no public
 // bootstrap endpoint is needed.
 function renderLoadcArtifact() {
+  const template = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8');
+  if (!template.includes('__LOADA_D__')) return template;
   const capability = createLoadaPathCapability();
   if (!capability) return null;
-  const template = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8');
   return template
     .replace('__LOADA_D__', capability.d)
     .replace('__LOADA_N__', capability.n)
