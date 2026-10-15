@@ -143,7 +143,14 @@ end
 local decoded
 pcall(function() decoded = HttpService:JSONDecode(res.Body) end)
 if not decoded or decoded.valid ~= true then
-    return Kick("[999MS] " .. ((decoded and decoded.reason) or "Unauthorized"))
+    -- API diagnostics are category-only. The popup retains an opaque reference;
+    -- the server logs the matching category/reference without recording any
+    -- credential, ticket, HWID, token, or runtime-secret value.
+    local diagnostic = decoded and decoded.diagnostic
+    if type(diagnostic) ~= "string" or not diagnostic:match("^D2_[A-Z0-9_]+$") then
+        diagnostic = "D2_RESPONSE_INVALID"
+    end
+    return Kick("[999MS] " .. diagnostic)
 end
 
 -- The one-time runtime proof succeeded; consume the client chain mark.

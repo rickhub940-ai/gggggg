@@ -10,7 +10,7 @@ const {
   isValidScriptName,
   encodeProtectedPayload,
   decodeProtectedPayload,
-  createRuntimeCredentials,
+  deriveRuntimeCredentials,
   verifyRuntimeProof,
 } = require('../lib/999MS-server-sdk');
 const {
@@ -337,7 +337,13 @@ async function handleScript(req, res, ip) {
     }, xorKey));
   }
 
-  const { scriptToken, runtimeSecret } = createRuntimeCredentials();
+  // Keep the response fields compatible with the existing obfuscated stages,
+  // while making the proof verifiable by any Vercel instance (no in-memory
+  // affinity is required between /api/script and /api/script-verify).
+  const { scriptToken, runtimeSecret } = deriveRuntimeCredentials({
+    ticketPayload: payload,
+    scriptName: name,
+  });
 
   sessions.set(payload.jti, {
     createdAt: Date.now(),
@@ -381,43 +387,75 @@ async function handleScript(req, res, ip) {
 }
 
 // ═══ /api/script-verify ═══
+// The on-screen client reference stays opaque. This server-side category is
+// intentionally credential-free, so it can be safely correlated in Vercel logs
+// without recording keys, tickets, HWIDs, tokens, or runtime secrets.
+function diagnosticReference(category) {
+  const text = `[999MS] ${category}`;
+  let hash = 5381;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 33 + text.charCodeAt(index) + index + 1) % 2147483647;
+  }
+  return `MS9-${hash.toString(16).toUpperCase().padStart(8, '0')}`;
+}
+
+function rejectRuntimeVerification(res, status, category) {
+  console.warn(`[script-verify] category=${category} reference=${diagnosticReference(category)}`);
+  return res.status(status).json({ valid: false, diagnostic: category });
+}
+
 async function handleScriptVerify(req, res) {
   const { ticket, hwid, scriptToken, runtimeSecret, scriptName } = req.body || {};
 
-  if (typeof ticket !== 'string' || ticket.length > 4096)
-    return res.status(400).json({ valid: false, reason: 'no ticket' });
+  if (typeof ticket !== 'string' || ticket.length > 4096) {
+    return rejectRuntimeVerification(res, 400, 'D2_TICKET_MISSING');
+  }
 
   const payload = verifyTicket(ticket);
-  if (!payload) return res.status(401).json({ valid: false, reason: 'invalid ticket' });
+  if (!payload) return rejectRuntimeVerification(res, 401, 'D2_TICKET_INVALID');
+  if (payload.scope !== 'script') return rejectRuntimeVerification(res, 403, 'D2_TICKET_SCOPE');
 
-  const session = sessions.get(payload.jti);
-  if (!session) return res.status(403).json({ valid: false, reason: 'session not found' });
+  const banReason = checkRevoked({ userId: payload.userId });
+  if (banReason) return rejectRuntimeVerification(res, 403, 'D2_REVOKED');
 
-  const reason = checkRevoked({ userId: payload.userId });
-  if (reason)
-    return res.status(403).json({ valid: false, reason: 'Banned: ' + reason });
-
-  if (typeof runtimeSecret !== 'string' || runtimeSecret.length !== 64)
-    return res.status(403).json({ valid: false, reason: 'no runtime secret' });
-  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
-    return res.status(403).json({ valid: false, reason: 'hwid mismatch' });
+  if (typeof runtimeSecret !== 'string' || runtimeSecret.length !== 64) {
+    return rejectRuntimeVerification(res, 403, 'D2_SECRET_FORMAT');
+  }
+  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512) {
+    return rejectRuntimeVerification(res, 403, 'D2_HWID_FORMAT');
+  }
 
   const proofFailure = verifyRuntimeProof({
-    session,
+    ticketPayload: payload,
     runtimeSecret,
     scriptToken,
     hwidHash: hashHwid(hwid),
     scriptName,
-    sessionTtl: SESSION_TTL,
     runtimeTtl: RUNTIME_TTL,
   });
-  if (proofFailure)
-    return res.status(403).json({ valid: false, reason: proofFailure });
+  if (proofFailure) {
+    const categories = {
+      'ticket claims invalid': 'D2_TICKET_CLAIMS',
+      'scriptName changed': 'D2_SCRIPT_MISMATCH',
+      'hwid mismatch': 'D2_HWID_MISMATCH',
+      'token malformed': 'D2_TOKEN_FORMAT',
+      'runtime expired': 'D2_RUNTIME_EXPIRED',
+      'token mismatch': 'D2_TOKEN_MISMATCH',
+      'secret mismatch': 'D2_SECRET_MISMATCH',
+    };
+    return rejectRuntimeVerification(res, 403, categories[proofFailure] || 'D2_PROOF_REJECTED');
+  }
 
-  session.verified = true;
-  session.verifiedAt = Date.now();
+  // This in-memory entry is only used by the optional heartbeat UX. It is no
+  // longer an authorization dependency, so a new Vercel instance cannot turn
+  // a valid proof into a false "session not found" failure.
+  const session = sessions.get(payload.jti);
+  if (session) {
+    session.verified = true;
+    session.verifiedAt = Date.now();
+  }
 
-  return res.status(200).json({ valid: true, serverId: payload.jti });
+  return res.status(200).json({ valid: true, serverId: payload.jti, diagnostic: 'D2_OK' });
 }
 
 // ═══ /api/heartbeat ═══

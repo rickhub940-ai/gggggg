@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const { issueTicket, verifyTicket } = require('../lib/ticket');
+const { issueTicket, verifyTicket, hashHwid } = require('../lib/ticket');
 const authHandler = require('../api/auth');
 const {
   RNG_CHALLENGE_TRANSFORMS,
@@ -13,7 +13,7 @@ const {
   isValidScriptName,
   encodeProtectedPayload,
   decodeProtectedPayload,
-  createRuntimeCredentials,
+  deriveRuntimeCredentials,
   verifyRuntimeProof,
 } = require('../lib/999MS-server-sdk');
 
@@ -92,6 +92,11 @@ assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.
 assert.match(mainSource, /Chain\.Stage ~= "script"/);
 assert.match(mainSource, /\$\{SCRIPTID\}/);
 assert.match(mainSource, /\$\{SERVERID\}/);
+assert.match(mainSource, /D2_RESPONSE_INVALID/);
+assert.match(mainSource, /decoded and decoded\.diagnostic/);
+assert.match(authSource, /function rejectRuntimeVerification\(res, status, category\)/);
+assert.match(authSource, /category=\$\{category\} reference=\$\{diagnosticReference\(category\)\}/);
+assert.match(authSource, /deriveRuntimeCredentials/);
 
 assert.equal(isValidScriptName('main'), true);
 assert.equal(isValidScriptName('main-v2_1'), true);
@@ -104,29 +109,6 @@ assert.deepEqual(decodeProtectedPayload(envelope, key), { ok: true, data: { hell
 assert.equal(decodeProtectedPayload({ Data: [999] }, key).ok, false);
 assert.throws(() => encodeProtectedPayload({}, ''), /PAYLOAD_XOR_KEY/);
 
-const credentials = createRuntimeCredentials();
-const session = {
-  createdAt: Date.now(),
-  scriptIssuedAt: Date.now(),
-  hwidHash: 'a'.repeat(64),
-  scriptName: 'main',
-  scriptToken: credentials.scriptToken,
-  runtimeSecret: credentials.runtimeSecret,
-  verified: false,
-};
-const proof = {
-  session,
-  scriptName: 'main',
-  scriptToken: credentials.scriptToken,
-  runtimeSecret: credentials.runtimeSecret,
-  hwidHash: 'a'.repeat(64),
-};
-assert.equal(verifyRuntimeProof(proof), null);
-assert.equal(verifyRuntimeProof({ ...proof, scriptName: 'other' }), 'scriptName changed');
-assert.equal(verifyRuntimeProof({ ...proof, runtimeSecret: '0'.repeat(64) }), 'secret mismatch');
-assert.equal(verifyRuntimeProof({ ...proof, hwidHash: 'b'.repeat(64) }), 'hwid mismatch');
-assert.equal(verifyRuntimeProof({ ...proof, session: { ...session, verified: true } }), 'already verified');
-
 const previousTicketSecret = process.env.TICKET_SECRET;
 process.env.TICKET_SECRET = 'test-ticket-secret-with-at-least-thirty-two-characters';
 const ticketOne = issueTicket({ hwidHash: 'a'.repeat(64), scope: 'script', scriptName: 'main' });
@@ -138,13 +120,37 @@ assert.equal(decodedTicketOne.scope, 'script');
 assert.equal(decodedTicketOne.scriptName, 'main');
 assert.match(decodedTicketOne.jti, /^[a-f0-9]{24}$/);
 assert.notEqual(decodedTicketOne.jti, decodedTicketTwo.jti);
-if (previousTicketSecret === undefined) delete process.env.TICKET_SECRET;
-else process.env.TICKET_SECRET = previousTicketSecret;
+
+const runtimeNow = Date.now();
+const credentials = deriveRuntimeCredentials({
+  ticketPayload: decodedTicketOne,
+  scriptName: 'main',
+  issuedAt: runtimeNow,
+});
+assert.match(credentials.scriptToken, /^[0-9a-z]+\.[a-f0-9]{64}$/);
+assert.match(credentials.runtimeSecret, /^[a-f0-9]{64}$/);
+const proof = {
+  ticketPayload: decodedTicketOne,
+  scriptName: 'main',
+  scriptToken: credentials.scriptToken,
+  runtimeSecret: credentials.runtimeSecret,
+  hwidHash: 'a'.repeat(64),
+  now: runtimeNow + 100,
+};
+assert.equal(verifyRuntimeProof(proof), null);
+assert.equal(verifyRuntimeProof({ ...proof, scriptName: 'other' }), 'scriptName changed');
+assert.equal(verifyRuntimeProof({ ...proof, runtimeSecret: '0'.repeat(64) }), 'secret mismatch');
+assert.equal(verifyRuntimeProof({ ...proof, hwidHash: 'b'.repeat(64) }), 'hwid mismatch');
+assert.equal(verifyRuntimeProof({ ...proof, scriptToken: 'not-a-runtime-token' }), 'token malformed');
+assert.equal(verifyRuntimeProof({ ...proof, now: runtimeNow + 60001 }), 'runtime expired');
+assert.equal(verifyRuntimeProof({ ...proof, ticketPayload: { ...decodedTicketOne, scope: 'other' } }), 'ticket claims invalid');
+
+// Keep this test-only secret active through the endpoint tests below.
 
 const previousLoadaPathSecret = process.env.LOADA_PATH_SECRET;
 process.env.LOADA_PATH_SECRET = 'test-loada-path-secret-with-at-least-thirty-two-characters';
 
-async function requestEndpoint(url, headers = {}) {
+async function requestEndpoint(url, headers = {}, method = 'GET', body = undefined) {
   const response = {
     headers: {},
     statusCode: null,
@@ -156,8 +162,9 @@ async function requestEndpoint(url, headers = {}) {
   };
   await authHandler({
     url,
-    method: 'GET',
+    method,
     headers,
+    body,
     socket: { remoteAddress: 'sdk-test' },
   }, response);
   return response;
@@ -174,6 +181,41 @@ function parseRenderedLoadc(source) {
 }
 
 (async () => {
+  // This succeeds without a preceding in-memory /api/script session. It proves
+  // runtime verification is portable across independent Vercel instances.
+  const verificationHwid = 'sdk-runtime-hwid';
+  const verificationTicket = issueTicket({
+    hwidHash: hashHwid(verificationHwid), scope: 'script', scriptName: 'main',
+  });
+  const verificationPayload = verifyTicket(verificationTicket);
+  const verificationCredentials = deriveRuntimeCredentials({
+    ticketPayload: verificationPayload, scriptName: 'main',
+  });
+  const statelessRuntime = await requestEndpoint('/api/auth?action=script-verify', {
+    'content-type': 'application/json', 'x-client': 'Roblox',
+  }, 'POST', {
+    ticket: verificationTicket,
+    hwid: verificationHwid,
+    scriptToken: verificationCredentials.scriptToken,
+    runtimeSecret: verificationCredentials.runtimeSecret,
+    scriptName: 'main',
+  });
+  assert.equal(statelessRuntime.statusCode, 200);
+  assert.equal(statelessRuntime.body.valid, true);
+  assert.equal(statelessRuntime.body.diagnostic, 'D2_OK');
+
+  const mismatchedRuntime = await requestEndpoint('/api/auth?action=script-verify', {
+    'content-type': 'application/json', 'x-client': 'Roblox',
+  }, 'POST', {
+    ticket: verificationTicket,
+    hwid: verificationHwid,
+    scriptToken: verificationCredentials.scriptToken,
+    runtimeSecret: '0'.repeat(64),
+    scriptName: 'main',
+  });
+  assert.equal(mismatchedRuntime.statusCode, 403);
+  assert.equal(mismatchedRuntime.body.diagnostic, 'D2_SECRET_MISMATCH');
+
   const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
   const secondExecutorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
   const browserArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', { 'user-agent': 'Mozilla/5.0' });
@@ -228,10 +270,14 @@ function parseRenderedLoadc(source) {
   assert.equal(robloxUnknownPath.headers.Location, undefined);
   if (previousLoadaPathSecret === undefined) delete process.env.LOADA_PATH_SECRET;
   else process.env.LOADA_PATH_SECRET = previousLoadaPathSecret;
+  if (previousTicketSecret === undefined) delete process.env.TICKET_SECRET;
+  else process.env.TICKET_SECRET = previousTicketSecret;
   console.log('PASS 999MS Server SDK, per-request loadc capabilities, and browser trap tests');
 })().catch((error) => {
   if (previousLoadaPathSecret === undefined) delete process.env.LOADA_PATH_SECRET;
   else process.env.LOADA_PATH_SECRET = previousLoadaPathSecret;
+  if (previousTicketSecret === undefined) delete process.env.TICKET_SECRET;
+  else process.env.TICKET_SECRET = previousTicketSecret;
   console.error(error);
   process.exitCode = 1;
 });
