@@ -42,23 +42,22 @@ const authSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'auth.js'),
 const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loada.lua'), 'utf8');
 const loadaSha = crypto.createHash('sha256').update(stageTwoSource).digest('hex');
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
-const obfuscatedClientArtifacts = [
+const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
+const goofyscatorClientArtifacts = [
   ['loada', stageTwoSource, true],
   ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'), false],
   ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'), false],
   ['sdk', fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8'), false],
-  ['main', fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8'), false],
 ];
 
-for (const [name, source, hasStageTwoSentinel] of obfuscatedClientArtifacts) {
+for (const [name, source, hasStageTwoSentinel] of goofyscatorClientArtifacts) {
   assert.ok(source.length > 1000, `${name} must not be an empty client artifact`);
   if (hasStageTwoSentinel) assert.match(source, /^-- supper_Boom\n/);
-  assert.match(source, /--\[\[ v1\.0\.0 https:\/\/wearedevs\.net\/obfuscator \]\]/);
+  assert.match(source, /-- This file is protected by goofyscator V11 BETA-1/);
   assert.doesNotMatch(source, /GUF_(?:NO_VIRTUALIZE|JIT|JIT_MAX|CRASH|ENCFUNC|ENCSTR)\s*\(/);
-  assert.doesNotMatch(source, /\$\{(?:SCRIPTID|SERVERID|HWIDHASH|ISSUED)\}/);
 }
 
-assert.equal(loadaSha, '4fb5e02f32a539e55c61222e6ea3be15b3eff281b143c5f810cbf8cb47689c4b');
+assert.equal(loadaSha, 'e12cc24ee7e6905f11303b5b7530ff3740ff1442c071218c512cfc1a00901f6c');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /local d="__LOADA_D__"/);
 assert.match(loadcSource, /local n="__LOADA_N__"/);
@@ -80,7 +79,7 @@ assert.match(authSource, /function createLoadaPathCapability\(\)/);
 assert.match(authSource, /const LOADA_PATH_TTL = 20 \* 1000/);
 assert.match(authSource, /const clientChallenge = validateClientChallenge\(req\.body\)/);
 assert.match(authSource, /check: createChallengeResponse\(clientChallenge\.values\)/);
-assert.doesNotMatch(authSource, /scriptBody = scriptBody|\$\{(?:SCRIPTID|SERVERID|HWIDHASH|ISSUED)\}/);
+assert.match(authSource, /scriptBody = scriptBody/);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap'), false);
 for (const name of ['loadc', 'loader', 'sdk']) {
   assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);
@@ -90,6 +89,9 @@ assert.equal(vercelConfig.routes.some((entry) => (
   entry.dest === '/api/auth?action=artifact&name=loada&d=$1&n=$2'
 )), true);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.dest === '/api/auth?action=trap'), true);
+assert.match(mainSource, /Chain\.Stage ~= "script"/);
+assert.match(mainSource, /\$\{SCRIPTID\}/);
+assert.match(mainSource, /\$\{SERVERID\}/);
 
 assert.equal(isValidScriptName('main'), true);
 assert.equal(isValidScriptName('main-v2_1'), true);
