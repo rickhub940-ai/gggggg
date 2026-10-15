@@ -360,12 +360,9 @@ async function handleScript(req, res, ip) {
     return res.status(200).json(encodeProtectedPayload({ Valid: false, reason: 'Script not found: ' + name }, xorKey));
   }
 
-  scriptBody = scriptBody
-    .replace(/\$\{SERVERID\}/g, payload.jti)
-    .replace(/\$\{SCRIPTID\}/g, name)
-    .replace(/\$\{HWIDHASH\}/g, payload.hwidHash)
-    .replace(/\$\{ISSUED\}/g, new Date().toISOString());
-
+  // The protected main script is fully obfuscated. Runtime metadata is
+  // delivered in the authenticated response below; payload.lua installs it in
+  // short-lived chain state before evaluating Body.
   const check = createChallengeResponse(rngChallenge.values);
 
   return res.status(200).json(encodeProtectedPayload({

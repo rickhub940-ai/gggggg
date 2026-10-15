@@ -37,29 +37,28 @@ for (let index = 0; index < values.length; index += 1) {
   assert.equal((encodedChallenge[index] - offset) / multiplier, values[index]);
 }
 
-const expectedTransforms = RNG_CHALLENGE_TRANSFORMS.map(({ multiplier, offset }) => [multiplier, offset]);
-const clientSdkSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8');
-const clientSdkTransforms = [...clientSdkSource.matchAll(
-  /\{ multiplier = (-?\d+), offset = (-?\d+) \}/g,
-)].map((match) => [Number(match[1]), Number(match[2])]);
-assert.deepEqual(clientSdkTransforms, expectedTransforms);
-
-const payloadSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
-const multipliers = payloadSource.match(/local ChallengeMultipliers = \{ ([^}]+) \}/)[1]
-  .split(',').map((value) => Number(value.trim()));
-const offsets = payloadSource.match(/local ChallengeOffsets = \{ ([^}]+) \}/)[1]
-  .split(',').map((value) => Number(value.trim()));
-assert.deepEqual(multipliers.map((value, index) => [value, offsets[index]]), expectedTransforms);
-
 const loadcSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loadc.lua'), 'utf8');
 const authSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'auth.js'), 'utf8');
 const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loada.lua'), 'utf8');
 const loadaSha = crypto.createHash('sha256').update(stageTwoSource).digest('hex');
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
-const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8');
-const payloadLuaSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
-const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-assert.equal(loadaSha, '231545cd85204f3bdc0a7b65bf4829256700f79e301f86a4ebc9c79d58fe7566');
+const obfuscatedClientArtifacts = [
+  ['loada', stageTwoSource, true],
+  ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'), false],
+  ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'), false],
+  ['sdk', fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8'), false],
+  ['main', fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8'), false],
+];
+
+for (const [name, source, hasStageTwoSentinel] of obfuscatedClientArtifacts) {
+  assert.ok(source.length > 1000, `${name} must not be an empty client artifact`);
+  if (hasStageTwoSentinel) assert.match(source, /^-- supper_Boom\n/);
+  assert.match(source, /--\[\[ v1\.0\.0 https:\/\/wearedevs\.net\/obfuscator \]\]/);
+  assert.doesNotMatch(source, /GUF_(?:NO_VIRTUALIZE|JIT|JIT_MAX|CRASH|ENCFUNC|ENCSTR)\s*\(/);
+  assert.doesNotMatch(source, /\$\{(?:SCRIPTID|SERVERID|HWIDHASH|ISSUED)\}/);
+}
+
+assert.equal(loadaSha, '4fb5e02f32a539e55c61222e6ea3be15b3eff281b143c5f810cbf8cb47689c4b');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /local d="__LOADA_D__"/);
 assert.match(loadcSource, /local n="__LOADA_N__"/);
@@ -81,9 +80,7 @@ assert.match(authSource, /function createLoadaPathCapability\(\)/);
 assert.match(authSource, /const LOADA_PATH_TTL = 20 \* 1000/);
 assert.match(authSource, /const clientChallenge = validateClientChallenge\(req\.body\)/);
 assert.match(authSource, /check: createChallengeResponse\(clientChallenge\.values\)/);
-assert.match(payloadLuaSource, /local rng = MakeRngChallenge\(\)/);
-assert.match(payloadLuaSource, /if not VerifyRngChallenge\(r1\.data\.check, rng\) then/);
-assert.match(payloadLuaSource, /if not VerifyRngChallenge\(decrypted\.check, rng\) then/);
+assert.doesNotMatch(authSource, /scriptBody = scriptBody|\$\{(?:SCRIPTID|SERVERID|HWIDHASH|ISSUED)\}/);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap'), false);
 for (const name of ['loadc', 'loader', 'sdk']) {
   assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);
@@ -93,44 +90,6 @@ assert.equal(vercelConfig.routes.some((entry) => (
   entry.dest === '/api/auth?action=artifact&name=loada&d=$1&n=$2'
 )), true);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.dest === '/api/auth?action=trap'), true);
-assert.match(stageTwoSource, /chainIs\("stage1", CHAIN_TTL\)/);
-assert.match(stageTwoSource, /chain\.Stage = "stage2"/);
-assert.match(loaderSource, /chainIs\("stage2", CHAIN_TTL\)/);
-assert.match(loaderSource, /Chain\.Stage = "loader"/);
-assert.match(payloadLuaSource, /chainIs\("loader", CHAIN_TTL\)/);
-assert.match(payloadLuaSource, /Chain\.Stage = "payload"/);
-assert.match(payloadLuaSource, /Chain\.Stage = "script"/);
-assert.match(mainSource, /Chain\.Stage ~= "script"/);
-// Hook protection is capability-based. Stage 2 performs the only actual
-// hookfunction operation. C-closure/isfunctionhooked values are retained only
-// as soft diagnostics because VM obfuscators may legitimately change them.
-assert.match(stageTwoSource, /local SafeHookFunction = hookfunction/);
-assert.match(stageTwoSource, /local SafeIsHooked = isfunctionhooked/);
-assert.match(stageTwoSource, /local function softHookAudit\(label, fn\)/);
-assert.match(stageTwoSource, /pcall\(SafeHookFunction, target, SafeNewCClosure/);
-assert.match(stageTwoSource, /HookAudit\.writeMonitorInstalled = true/);
-assert.match(loaderSource, /local Stage2WriteMonitor = ChainEnv\.MS999WriteMonitor/);
-assert.match(loaderSource, /HookAudit\.writeMonitorInstalled ~= true/);
-assert.match(loaderSource, /local SafeRawset = rawset/);
-assert.match(loaderSource, /local SafeRawget = rawget/);
-assert.match(loaderSource, /softFunctionAudit\("math\.random", SafeRandom\)/);
-assert.match(loaderSource, /SafeRawget\(rawProbe, "__999MS_probe"\) == rawMarker/);
-assert.match(loaderSource, /pcall\(SafeRandom, 1, 1000000\)/);
-assert.match(loaderSource, /ChainEnv\.MS999PrimitiveCheck = \{ rawTable = true, random = true \}/);
-assert.match(stageTwoSource, /env\.MS999Request = requestFn/);
-assert.match(loaderSource, /and ChainEnv\.MS999Request or resolveRequest\(\)/);
-assert.match(loaderSource, /softFunctionAudit\("request", HttpRequest\)/);
-assert.match(loaderSource, /ChainEnv\.MS999RequestAudit = HookAudit\.request/);
-assert.match(payloadLuaSource, /local Stage2WriteMonitor = ChainEnv\.MS999WriteMonitor/);
-assert.match(payloadLuaSource, /HookAudit\.writeMonitorInstalled ~= true/);
-assert.match(payloadLuaSource, /PrimitiveCheck\.rawTable ~= true/);
-assert.match(payloadLuaSource, /PrimitiveCheck\.random ~= true/);
-for (const source of [loaderSource, payloadLuaSource]) {
-  assert.doesNotMatch(source, /\bisfunctionhooked\s*\(/);
-  assert.doesNotMatch(source, /\bdebug\.getinfo\s*\(/);
-}
-assert.doesNotMatch(stageTwoSource, /\bNfCrash\b/);
-assert.doesNotMatch(payloadLuaSource, /\bNfCrash\b|\bSecureCrash\b|\bTamperKick\b/);
 
 assert.equal(isValidScriptName('main'), true);
 assert.equal(isValidScriptName('main-v2_1'), true);
