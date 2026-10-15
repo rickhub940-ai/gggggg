@@ -73,27 +73,23 @@ assert.doesNotMatch(mainSource, /--/);
 
 assert.equal(loadaSha, '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d');
 assert.match(loadcSource, /if not game:IsLoaded\(\) then game.Loaded:Wait\(\) end/);
-assert.match(loadcSource, /local __CLOCK__=os\.clock\(\)/);
-assert.match(loadcSource, /local __TIME__=os\.time\(\)/);
-assert.match(loadcSource, /local __DATE__=os\.date\("\*t"\)/);
-assert.match(loadcSource, /local __DIFF__=os\.difftime\(__TIME__,__TIME__-1\)/);
-assert.match(loadcSource, /local __STAMP__=table\.concat\(\{tostring\(__TIME__\),tostring\(__DATE__\.year\),tostring\(__DATE__\.yday\),tostring\(__DATE__\.hour\),tostring\(__DATE__\.min\),tostring\(__DATE__\.sec\),tostring\(__DIFF__\)\},"-"\)/);
+assert.match(loadcSource, /^__PRELUDE__$/m);
+assert.match(loadcSource, /^__SETUP__$/m);
 assert.doesNotMatch(loadcSource, /\bprint\s*\(/);
-assert.match(loadcSource, /local __D__="__LOADA_D__"/);
-assert.match(loadcSource, /local __N__="__LOADA_N__"/);
-assert.match(loadcSource, /local __ID__="__CHAIN_ID__"/);
-assert.match(loadcSource, /local __URL__=__BASE__\.\."\/loada\.lua\/"\.\.__D__\.\."\/"\.\.__N__\.\.'\?run='\.\.tostring\(__CLOCK__\)\.\.'&stamp='\.\.__STAMP__/);
-assert.match(loadcSource, /game:HttpGet\(__URL__\)/);
-assert.match(loadcSource, new RegExp(`local __HASH__="${loadaSha}"`));
+assert.doesNotMatch(loadcSource, /0x[0-9a-f]+/i);
+assert.match(loadcSource, /MS999:S1:E02:HTTP_GET_FAILED/);
+assert.match(loadcSource, /MS999:S1:E03:SHA256_MISMATCH/);
+assert.match(loadcSource, /MS999:S1:E04:LOADER_UNAVAILABLE/);
+assert.match(loadcSource, /MS999:S1:E05:STAGE2_COMPILE_FAILED/);
+assert.match(loadcSource, /return __FUNCTION__\(__ARGS__,\.\.\.\)/);
 assert.doesNotMatch(loadcSource, /api\/bootstrap|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
-assert.match(loadcSource, /error\("0x4f98daf3fd5d",0\)/);
-assert.match(loadcSource, /error\("0x31d7a640f95e",0\)/);
-assert.match(loadcSource, /error\("0x75934d1098b9",0\)/);
-assert.match(loadcSource, /error\("0xc6ee23173a05",0\)/);
-assert.match(loadcSource, /return __FUNCTION__\(__ARGS__,\.\.\.\)/);
-
 assert.match(authSource, /function renderLoadcArtifact\(\)/);
+assert.match(authSource, /const LOADC_PRELUDE_LINES/);
+assert.match(authSource, /const LOADC_SETUP_BLOCKS/);
+assert.match(authSource, /function shuffled\(items\)/);
+assert.match(authSource, /MS999:S1:E01:CHAIN_ID_INVALID/);
+
 assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
 assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
 assert.match(authSource, /crypto\.randomBytes\(26\)\.toString\('hex'\)/);
@@ -207,11 +203,32 @@ function parseRenderedLoadc(source) {
   assert.equal(source.includes('__LOADA_N__'), false);
   assert.equal(source.includes('__CHAIN_ID__'), false);
   assert.equal(source.includes('__CLOCK__'), false);
+  assert.equal(source.includes('__PRELUDE__'), false);
+  assert.equal(source.includes('__SETUP__'), false);
+  assert.doesNotMatch(source, /0x[0-9a-f]+/i);
+  for (const diagnostic of [
+    'MS999:S1:E01:CHAIN_ID_INVALID',
+    'MS999:S1:E02:HTTP_GET_FAILED',
+    'MS999:S1:E03:SHA256_MISMATCH',
+    'MS999:S1:E04:LOADER_UNAVAILABLE',
+    'MS999:S1:E05:STAGE2_COMPILE_FAILED',
+  ]) assert.ok(source.includes(diagnostic), `missing ${diagnostic}`);
   const localNames = [...source.matchAll(/local ([a-z](?:,[a-z])*)=/g)]
     .flatMap((match) => match[1].split(','));
   assert.ok(localNames.length >= 20);
   assert.equal(new Set(localNames).size, localNames.length);
-  return { chainId, d, n, localNames };
+  const positions = [
+    ['clock', source.indexOf('=os.clock()')],
+    ['time', source.indexOf('=os.time()')],
+    ['date', source.indexOf('=os.date("*t")')],
+    ['base', source.indexOf('="https://loader999ms.vercel.app"')],
+    ['timeStamp', source.indexOf('=os.difftime(')],
+    ['stageArgs', source.indexOf(',"/loada.lua","999MS-chain-v1","lite",true}')],
+    ['chainState', source.indexOf('MS999Chain={Version="999MS-chain-v1"')],
+  ];
+  assert.ok(positions.every(([, index]) => index >= 0));
+  const blockOrder = positions.sort(([, left], [, right]) => left - right).map(([name]) => name);
+  return { chainId, d, n, localNames, blockOrder };
 }
 
 (async () => {
@@ -267,6 +284,8 @@ function parseRenderedLoadc(source) {
   assert.notEqual(firstLoadc.n, secondLoadc.n);
   assert.notDeepEqual(firstLoadc.localNames, secondLoadc.localNames);
   assert.notDeepEqual(secondLoadc.localNames, robloxLoadc.localNames);
+  assert.notDeepEqual(firstLoadc.blockOrder, secondLoadc.blockOrder);
+  assert.notDeepEqual(secondLoadc.blockOrder, robloxLoadc.blockOrder);
   assert.notEqual(secondLoadc.chainId, robloxLoadc.chainId);
 
   const loadaWithoutPathToken = await requestEndpoint('/api/auth?action=artifact&name=loada', { 'X-Client': 'ROBLOX' });

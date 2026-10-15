@@ -245,14 +245,42 @@ const LOADC_VARIABLE_TOKENS = Object.freeze([
   '__LOADER__', '__EXECUTED__', '__FUNCTION__',
 ]);
 const LOADC_SHORT_IDENTIFIERS = Object.freeze('abcdefghijklmnopqrstuvwxyz'.split(''));
+const LOADC_PRELUDE_LINES = Object.freeze([
+  'local __CLOCK__=os.clock()',
+  'local __TIME__=os.time()',
+  'local __DATE__=os.date("*t")',
+  'local __BASE__="https://loader999ms.vercel.app"',
+  'local __D__="__LOADA_D__"',
+  'local __N__="__LOADA_N__"',
+  'local __ID__="__CHAIN_ID__"',
+  'local __HASH__="1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d"',
+  'local __ENV__=(getgenv and getgenv())or _G',
+]);
+let lastLoadcLayout = '';
+const LOADC_SETUP_BLOCKS = Object.freeze([
+  [
+    'local __DIFF__=os.difftime(__TIME__,__TIME__-1)',
+    'local __STAMP__=table.concat({tostring(__TIME__),tostring(__DATE__.year),tostring(__DATE__.yday),tostring(__DATE__.hour),tostring(__DATE__.min),tostring(__DATE__.sec),tostring(__DIFF__)},"-")',
+  ].join('\n'),
+  'local __ARGS__={__BASE__,"/loada.lua","999MS-chain-v1","lite",true}',
+  [
+    'if not __ID__:match("^[a-f0-9]+$")or #__ID__~=64 then error("MS999:S1:E01:CHAIN_ID_INVALID",0)end',
+    '__ENV__.MS999Chain=nil',
+    '__ENV__.MS999Chain={Version="999MS-chain-v1",Id=__ID__,Stage="stage1",UpdatedAt=tick()}',
+  ].join('\n'),
+]);
+
+function shuffled(items) {
+  const values = [...items];
+  for (let index = values.length - 1; index > 0; index -= 1) {
+    const swapIndex = crypto.randomInt(index + 1);
+    [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
+  }
+  return values;
+}
 
 function shuffledLoadcIdentifiers() {
-  const names = [...LOADC_SHORT_IDENTIFIERS];
-  for (let index = names.length - 1; index > 0; index -= 1) {
-    const swapIndex = crypto.randomInt(index + 1);
-    [names[index], names[swapIndex]] = [names[swapIndex], names[index]];
-  }
-  return names.slice(0, LOADC_VARIABLE_TOKENS.length);
+  return shuffled(LOADC_SHORT_IDENTIFIERS).slice(0, LOADC_VARIABLE_TOKENS.length);
 }
 
 function renderLoadcArtifact() {
@@ -263,9 +291,21 @@ function renderLoadcArtifact() {
     ['__LOADA_N__', capability.n],
     ['__CHAIN_ID__', crypto.randomBytes(32).toString('hex')],
   ]);
-  const identifiers = shuffledLoadcIdentifiers();
+  let identifiers;
+  let prelude;
+  let setup;
+  let layout;
+  do {
+    identifiers = shuffledLoadcIdentifiers();
+    prelude = shuffled(LOADC_PRELUDE_LINES);
+    setup = shuffled(LOADC_SETUP_BLOCKS);
+    layout = `${identifiers.join('')}:${prelude.join('|')}:${setup.join('|')}`;
+  } while (layout === lastLoadcLayout);
+  lastLoadcLayout = layout;
   LOADC_VARIABLE_TOKENS.forEach((token, index) => substitutions.set(token, identifiers[index]));
-  let body = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8');
+  let body = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
+    .replace('__PRELUDE__', prelude.join('\n'))
+    .replace('__SETUP__', setup.join('\n\n'));
   for (const [token, value] of substitutions) body = body.replaceAll(token, value);
   return body;
 }
