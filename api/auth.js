@@ -239,34 +239,34 @@ function serveArtifact(req, res, name, url) {
 // and a short-lived d/n capability directly in its source, so no public
 // bootstrap endpoint is needed.
 const LOADC_VARIABLE_TOKENS = Object.freeze([
-  '__CLOCK__', '__TIME__', '__DATE__', '__DIFF__', '__STAMP__',
-  '__BASE__', '__ARGS__', '__D__', '__N__', '__ID__', '__HASH__', '__ENV__',
-  '__URL__', '__FETCHED__', '__BODY__', '__CRYPTO__', '__HASHED__', '__DIGEST__',
-  '__LOADER__', '__EXECUTED__', '__FUNCTION__',
+  '@a@', '@b@', '@c@', '@d@', '@e@',
+  '@f@', '@g@', '@h@', '@i@', '@j@', '@k@', '@l@',
+  '@m@', '@n@', '@o@', '@p@', '@q@', '@r@',
+  '@s@', '@t@', '@u@',
 ]);
 const LOADC_SHORT_IDENTIFIERS = Object.freeze('abcdefghijklmnopqrstuvwxyz'.split(''));
 const LOADC_PRELUDE_LINES = Object.freeze([
-  'local __CLOCK__=os.clock()',
-  'local __TIME__=os.time()',
-  'local __DATE__=os.date("*t")',
-  'local __BASE__="https://loader999ms.vercel.app"',
-  'local __D__="__LOADA_D__"',
-  'local __N__="__LOADA_N__"',
-  'local __ID__="__CHAIN_ID__"',
-  'local __HASH__="1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d"',
-  'local __ENV__=(getgenv and getgenv())or _G',
+  'local @a@=os.clock()',
+  'local @b@=os.time()',
+  'local @c@=os.date("*t")',
+  'local @f@="https://loader999ms.vercel.app"',
+  'local @h@="@v@"',
+  'local @i@="@w@"',
+  'local @j@="@x@"',
+  'local @k@="1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d"',
+  'local @l@=(getgenv and getgenv())or _G',
 ]);
 let lastLoadcLayout = '';
 const LOADC_SETUP_BLOCKS = Object.freeze([
   [
-    'local __DIFF__=os.difftime(__TIME__,__TIME__-1)',
-    'local __STAMP__=table.concat({tostring(__TIME__),tostring(__DATE__.year),tostring(__DATE__.yday),tostring(__DATE__.hour),tostring(__DATE__.min),tostring(__DATE__.sec),tostring(__DIFF__)},"-")',
+    'local @d@=os.difftime(@b@,@b@-1)',
+    'local @e@=table.concat({tostring(@b@),tostring(@c@.year),tostring(@c@.yday),tostring(@c@.hour),tostring(@c@.min),tostring(@c@.sec),tostring(@d@)},"-")',
   ].join('\n'),
-  'local __ARGS__={__BASE__,"/loada.lua","999MS-chain-v1","lite",true}',
+  'local @g@={@f@,"/loada.lua","999MS-chain-v1","lite",true}',
   [
-    'if not __ID__:match("^[a-f0-9]+$")or #__ID__~=64 then error("MS999:S1:E01:CHAIN_ID_INVALID",0)end',
-    '__ENV__.MS999Chain=nil',
-    '__ENV__.MS999Chain={Version="999MS-chain-v1",Id=__ID__,Stage="stage1",UpdatedAt=tick()}',
+    'if not @j@:match("^[a-f0-9]+$")or #@j@~=64 then error("MS999:S1:E01:CHAIN_ID_INVALID",0)end',
+    '@l@.MS999Chain=nil',
+    '@l@.MS999Chain={Version="999MS-chain-v1",Id=@j@,Stage="stage1",UpdatedAt=tick()}',
   ].join('\n'),
 ]);
 
@@ -287,9 +287,9 @@ function renderLoadcArtifact() {
   const capability = createLoadaPathCapability();
   if (!capability) return null;
   const substitutions = new Map([
-    ['__LOADA_D__', capability.d],
-    ['__LOADA_N__', capability.n],
-    ['__CHAIN_ID__', crypto.randomBytes(32).toString('hex')],
+    ['@v@', capability.d],
+    ['@w@', capability.n],
+    ['@x@', crypto.randomBytes(32).toString('hex')],
   ]);
   let identifiers;
   let prelude;
@@ -304,8 +304,8 @@ function renderLoadcArtifact() {
   lastLoadcLayout = layout;
   LOADC_VARIABLE_TOKENS.forEach((token, index) => substitutions.set(token, identifiers[index]));
   let body = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
-    .replace('__PRELUDE__', prelude.join('\n'))
-    .replace('__SETUP__', setup.join('\n\n'));
+    .replace('@y@', prelude.join('\n'))
+    .replace('@z@', setup.join('\n\n'));
   for (const [token, value] of substitutions) body = body.replaceAll(token, value);
   return body;
 }

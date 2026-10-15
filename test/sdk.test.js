@@ -73,15 +73,15 @@ assert.doesNotMatch(mainSource, /--/);
 
 assert.equal(loadaSha, '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d');
 assert.match(loadcSource, /if not game:IsLoaded\(\) then game.Loaded:Wait\(\) end/);
-assert.match(loadcSource, /^__PRELUDE__$/m);
-assert.match(loadcSource, /^__SETUP__$/m);
+assert.match(loadcSource, /^@y@$/m);
+assert.match(loadcSource, /^@z@$/m);
 assert.doesNotMatch(loadcSource, /\bprint\s*\(/);
 assert.doesNotMatch(loadcSource, /0x[0-9a-f]+/i);
 assert.match(loadcSource, /MS999:S1:E02:HTTP_GET_FAILED/);
 assert.match(loadcSource, /MS999:S1:E03:SHA256_MISMATCH/);
 assert.match(loadcSource, /MS999:S1:E04:LOADER_UNAVAILABLE/);
 assert.match(loadcSource, /MS999:S1:E05:STAGE2_COMPILE_FAILED/);
-assert.match(loadcSource, /return __FUNCTION__\(__ARGS__,\.\.\.\)/);
+assert.match(loadcSource, /return @u@\(@g@,\.\.\.\)/);
 assert.doesNotMatch(loadcSource, /api\/bootstrap|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
 assert.match(authSource, /function renderLoadcArtifact\(\)/);
@@ -199,12 +199,12 @@ function parseRenderedLoadc(source) {
   assert.match(chainId, /^[a-f0-9]{64}$/);
   assert.match(d, /^[a-f0-9]{64}$/);
   assert.match(n, /^[a-f0-9]{64}$/);
-  assert.equal(source.includes('__LOADA_D__'), false);
-  assert.equal(source.includes('__LOADA_N__'), false);
-  assert.equal(source.includes('__CHAIN_ID__'), false);
-  assert.equal(source.includes('__CLOCK__'), false);
-  assert.equal(source.includes('__PRELUDE__'), false);
-  assert.equal(source.includes('__SETUP__'), false);
+  assert.equal(source.includes('@v@'), false);
+  assert.equal(source.includes('@w@'), false);
+  assert.equal(source.includes('@x@'), false);
+  assert.equal(source.includes('@a@'), false);
+  assert.equal(source.includes('@y@'), false);
+  assert.equal(source.includes('@z@'), false);
   assert.doesNotMatch(source, /0x[0-9a-f]+/i);
   for (const diagnostic of [
     'MS999:S1:E01:CHAIN_ID_INVALID',
