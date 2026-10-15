@@ -45,7 +45,6 @@ const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'verc
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
 const goofyscatorClientArtifacts = [
   ['loada', stageTwoSource, true],
-  ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'), false],
   ['sdk', fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8'), false],
 ];
 
@@ -56,14 +55,21 @@ for (const [name, source, hasStageTwoSentinel] of goofyscatorClientArtifacts) {
   assert.doesNotMatch(source, /GUF_(?:NO_VIRTUALIZE|JIT|JIT_MAX|CRASH|ENCFUNC|ENCSTR)\s*\(/);
 }
 
-// Goofyscator's payload VM fails to compile in the target executor. Keep the
-// other Goofy stages intact and use the known-compatible WAD payload instead.
-const payloadSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8');
-assert.ok(payloadSource.length > 1000, 'payload must not be empty');
-assert.match(payloadSource, /^--\[\[ v1\.0\.0 https:\/\/wearedevs\.net\/obfuscator \]\]/);
-assert.doesNotMatch(payloadSource, /goofyscator V11 BETA-1/);
-assert.equal(crypto.createHash('sha256').update(payloadSource).digest('hex'),
-  'ee825ee5b90c2ac5526b3349e4c7c7a30f7b7ae3cdd1fe8cca7e60fdb1a1b02c');
+// Goofyscator's loader/payload VM path fails to compile in the target
+// executor. Keep Stage 2 and SDK in Goofy, but use the known-compatible WAD
+// loader and payload for the loadstring hand-off.
+const wadRuntimeArtifacts = [
+  ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'),
+    'e9d32cbb9b17fdce91352fb3f9a60a8b81a91111f6c65fa71a191ef44d5b3a4b'],
+  ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'),
+    'ee825ee5b90c2ac5526b3349e4c7c7a30f7b7ae3cdd1fe8cca7e60fdb1a1b02c'],
+];
+for (const [name, source, expectedHash] of wadRuntimeArtifacts) {
+  assert.ok(source.length > 1000, `${name} must not be empty`);
+  assert.match(source, /^--\[\[ v1\.0\.0 https:\/\/wearedevs\.net\/obfuscator \]\]/);
+  assert.doesNotMatch(source, /goofyscator V11 BETA-1/);
+  assert.equal(crypto.createHash('sha256').update(source).digest('hex'), expectedHash);
+}
 
 assert.equal(loadaSha, 'e12cc24ee7e6905f11303b5b7530ff3740ff1442c071218c512cfc1a00901f6c');
 assert.equal(loadcSource.includes('\n'), false);
