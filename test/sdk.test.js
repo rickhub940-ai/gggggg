@@ -55,19 +55,21 @@ for (const [name, source, hasStageTwoSentinel] of goofyscatorClientArtifacts) {
   assert.doesNotMatch(source, /GUF_(?:NO_VIRTUALIZE|JIT|JIT_MAX|CRASH|ENCFUNC|ENCSTR)\s*\(/);
 }
 
-// Goofyscator's loader/payload VM path fails to compile in the target
-// executor. Keep Stage 2 and SDK in Goofy, but use the known-compatible WAD
-// loader and payload for the loadstring hand-off.
-const wadRuntimeArtifacts = [
+// RUNLUA HUB output uses Luau compound assignments (+=/-=), which standard
+// Lua parsers do not recognize. Keep its exact hashes and require executor
+// testing, while preserving Goofy Stage 2 and SDK unchanged.
+const runLuaRuntimeArtifacts = [
   ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'),
-    'e9d32cbb9b17fdce91352fb3f9a60a8b81a91111f6c65fa71a191ef44d5b3a4b'],
+    '374856f4016866b98e9c8ffcf1145ec5e6f802fc60a368a1b98f4fb1cd2445da'],
   ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'),
-    'ee825ee5b90c2ac5526b3349e4c7c7a30f7b7ae3cdd1fe8cca7e60fdb1a1b02c'],
+    '90d7243476ac2ca604d880125ec2b497f69a733f483f283bc9283fbe70c2e8f9'],
 ];
-for (const [name, source, expectedHash] of wadRuntimeArtifacts) {
+for (const [name, source, expectedHash] of runLuaRuntimeArtifacts) {
   assert.ok(source.length > 1000, `${name} must not be empty`);
-  assert.match(source, /^--\[\[ v1\.0\.0 https:\/\/wearedevs\.net\/obfuscator \]\]/);
-  assert.doesNotMatch(source, /goofyscator V11 BETA-1/);
+  assert.match(source, /^-- This file was obfuscated with RUNLUA HUB 1\.0/);
+  assert.match(source, /return select\(1,function\(\.\.\.\)/);
+  assert.match(source, /(?:\+=|-=)/);
+  assert.doesNotMatch(source, /goofyscator V11 BETA-1|wearedevs\.net\/obfuscator/);
   assert.equal(crypto.createHash('sha256').update(source).digest('hex'), expectedHash);
 }
 
