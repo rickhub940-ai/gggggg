@@ -119,7 +119,7 @@ local function getRequest()
     return (syn and syn.request) or (http and http.request) or request or http_request
 end
 
-local BASE_URL = "https://keysytemdemo.vercel.app"
+local BASE_URL = "https://loader999ms.vercel.app"
 local req = getRequest()
 if not req then return Kick("[999MS] HTTP not supported") end
 
