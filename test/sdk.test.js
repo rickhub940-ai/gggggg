@@ -43,37 +43,41 @@ const stageTwoSource = fs.readFileSync(path.join(__dirname, '..', 'artifacts', '
 const loadaSha = crypto.createHash('sha256').update(stageTwoSource).digest('hex');
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-const goofyscatorClientArtifacts = [
-  ['loada', stageTwoSource, true],
-  ['sdk', fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8'), false],
+const readableClientArtifacts = [
+  ['loada', stageTwoSource, true, '880b8fe236f278dc90197c712c7367785d84654dc8db7fe9f8d91ee10a8e76b8'],
+  ['sdk', fs.readFileSync(path.join(__dirname, '..', 'artifacts', '999MS-sdk.lua'), 'utf8'), false,
+    '832735d60fd42710b60abfc7f2599a107388c9ae259ea75c6a9c586e5d5cebe7'],
 ];
-
-for (const [name, source, hasStageTwoSentinel] of goofyscatorClientArtifacts) {
+for (const [name, source, hasStageTwoSentinel, expectedHash] of readableClientArtifacts) {
   assert.ok(source.length > 1000, `${name} must not be an empty client artifact`);
-  if (hasStageTwoSentinel) assert.match(source, /^-- supper_Boom\n/);
-  assert.match(source, /-- This file is protected by goofyscator V11 BETA-1/);
-  assert.doesNotMatch(source, /GUF_(?:NO_VIRTUALIZE|JIT|JIT_MAX|CRASH|ENCFUNC|ENCSTR)\s*\(/);
-}
-
-// RUNLUA HUB output uses Luau compound assignments (+=/-=), which standard
-// Lua parsers do not recognize. Keep its exact hashes and require executor
-// testing, while preserving Goofy Stage 2 and SDK unchanged.
-const runLuaRuntimeArtifacts = [
-  ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'),
-    '374856f4016866b98e9c8ffcf1145ec5e6f802fc60a368a1b98f4fb1cd2445da'],
-  ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'),
-    '90d7243476ac2ca604d880125ec2b497f69a733f483f283bc9283fbe70c2e8f9'],
-];
-for (const [name, source, expectedHash] of runLuaRuntimeArtifacts) {
-  assert.ok(source.length > 1000, `${name} must not be empty`);
-  assert.match(source, /^-- This file was obfuscated with RUNLUA HUB 1\.0/);
-  assert.match(source, /return select\(1,function\(\.\.\.\)/);
-  assert.match(source, /(?:\+=|-=)/);
-  assert.doesNotMatch(source, /goofyscator V11 BETA-1|wearedevs\.net\/obfuscator/);
+  if (hasStageTwoSentinel) {
+    assert.match(source, /^-- supper_Boom\n/);
+    // The only remaining -- text is the required marker comment and its
+    // matching runtime string used by the file-marker cleanup routine.
+    assert.doesNotMatch(source.slice('-- supper_Boom'.length).replaceAll('"-- supper_Boom"', ''), /--/);
+  } else {
+    assert.doesNotMatch(source, /--/);
+  }
   assert.equal(crypto.createHash('sha256').update(source).digest('hex'), expectedHash);
 }
 
-assert.equal(loadaSha, 'e12cc24ee7e6905f11303b5b7530ff3740ff1442c071218c512cfc1a00901f6c');
+// RUNLUA remains the only client obfuscation. Its banner comment is removed;
+// these outputs use Luau compound assignments and require executor validation.
+const runLuaRuntimeArtifacts = [
+  ['loader', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'),
+    '1cebe688fbbc811681973ce0859c7b406f651c7efa1125b4d5282f98f4838026'],
+  ['payload', fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'),
+    'c21ce99eb56c6152cc6df33a5b3aa60a91ebcf55a57a7640a3a2c9d9c2a53b5c'],
+];
+for (const [name, source, expectedHash] of runLuaRuntimeArtifacts) {
+  assert.ok(source.length > 1000, `${name} must not be empty`);
+  assert.match(source, /^return select\(1,function\(\.\.\.\)/);
+  assert.match(source, /(?:\+=|-=)/);
+  assert.doesNotMatch(source, /^-- This file was obfuscated/);
+  assert.equal(crypto.createHash('sha256').update(source).digest('hex'), expectedHash);
+}
+
+assert.equal(loadaSha, '880b8fe236f278dc90197c712c7367785d84654dc8db7fe9f8d91ee10a8e76b8');
 assert.equal(loadcSource.includes('\n'), false);
 assert.match(loadcSource, /local d="__LOADA_D__"/);
 assert.match(loadcSource, /local n="__LOADA_N__"/);

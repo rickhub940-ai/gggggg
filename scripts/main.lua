@@ -1,12 +1,12 @@
---// ═══════════════════════════════════════════════════════════
---// 999MS Script — Blox Fruits
---// ═══════════════════════════════════════════════════════════
+
+
+
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
--- Display an opaque local reference rather than exposing a human-readable
--- client-side check reason in Roblox's error prompt.
+
+
 local function makeKickCode(reason)
     local text = tostring(reason or "unknown")
     local hash = 5381
@@ -52,9 +52,9 @@ local function Kick(reason)
             task.wait(0.01)
         end
     end)
-    -- Best-effort executor signal trigger requested for compatible executors.
-    -- It is not a portable disconnect primitive, so LocalPlayer:Kick remains
-    -- the fail-closed fallback that actually enforces the disconnect.
+
+
+
     pcall(function()
         if type(replicatesignal) == "function" and LocalPlayer.StatsAvailable then
             replicatesignal(LocalPlayer.StatsAvailable, "Kick")
@@ -143,9 +143,9 @@ end
 local decoded
 pcall(function() decoded = HttpService:JSONDecode(res.Body) end)
 if not decoded or decoded.valid ~= true then
-    -- API diagnostics are category-only. The popup retains an opaque reference;
-    -- the server logs the matching category/reference without recording any
-    -- credential, ticket, HWID, token, or runtime-secret value.
+
+
+
     local diagnostic = decoded and decoded.diagnostic
     if type(diagnostic) ~= "string" or not diagnostic:match("^D2_[A-Z0-9_]+$") then
         diagnostic = "D2_RESPONSE_INVALID"
@@ -153,16 +153,14 @@ if not decoded or decoded.valid ~= true then
     return Kick("[999MS] " .. diagnostic)
 end
 
--- The one-time runtime proof succeeded; consume the client chain mark.
+
 if ChainEnv.MS999Chain == Chain then
     ChainEnv.MS999Chain = nil
 end
 
---// ═══════════════════════════════════════════════════════════
---// โค้ด Blox Fruits ของคุณเริ่มตรงนี้
---// ═══════════════════════════════════════════════════════════
+
+
+
 
 print("[999MS] Blox Fruits loaded!")
 print("[999MS] Session: ${SERVERID}")
-
--- โค้ดของคุ
