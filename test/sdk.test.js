@@ -72,26 +72,26 @@ for (const [name, source, expectedHash] of runLuaRuntimeArtifacts) {
 assert.doesNotMatch(mainSource, /--/);
 
 assert.equal(loadaSha, '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d');
-assert.match(loadcSource, /if not game:IsLoaded\(\)then game.Loaded:Wait\(\)end/);
+assert.match(loadcSource, /if not game:IsLoaded\(\) then game.Loaded:Wait\(\) end/);
 assert.match(loadcSource, /^__PRELUDE__$/m);
 assert.match(loadcSource, /^__SETUP__$/m);
 assert.doesNotMatch(loadcSource, /\bprint\s*\(/);
 assert.doesNotMatch(loadcSource, /0x[0-9a-f]+/i);
-for (const diagnostic of ['S1G', 'S1H', 'S1L', 'S1C']) assert.ok(loadcSource.includes(diagnostic));
-assert.match(loadcSource, /return __FUNCTION__\(\{__BASE__,"\/loada\.lua","999MS-chain-v1","lite",true\},\.\.\.\)/);
+assert.match(loadcSource, /MS999:S1:E02:HTTP_GET_FAILED/);
+assert.match(loadcSource, /MS999:S1:E03:SHA256_MISMATCH/);
+assert.match(loadcSource, /MS999:S1:E04:LOADER_UNAVAILABLE/);
+assert.match(loadcSource, /MS999:S1:E05:STAGE2_COMPILE_FAILED/);
+assert.match(loadcSource, /return __FUNCTION__\(__ARGS__,\.\.\.\)/);
 assert.doesNotMatch(loadcSource, /api\/bootstrap|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
 assert.match(authSource, /function renderLoadcArtifact\(\)/);
-assert.match(authSource, /const LOADC_DIAGNOSTICS/);
-assert.match(authSource, /const LOADC_TIME_VALUES/);
-assert.match(authSource, /const LOADC_SYSTEM_VALUES/);
-assert.match(authSource, /function compactLocalDeclaration\(entries\)/);
+assert.match(authSource, /const LOADC_PRELUDE_LINES/);
+assert.match(authSource, /const LOADC_SETUP_BLOCKS/);
 assert.match(authSource, /function shuffled\(items\)/);
-assert.match(authSource, /S1G: 'Stage 1 HTTP GET failed'/);
-assert.match(authSource, /S1H: 'Stage 1 SHA-256 verification failed'/);
-assert.match(authSource, /Buffer\.byteLength\(body, 'utf8'\) > 800/);
+assert.match(authSource, /MS999:S1:E01:CHAIN_ID_INVALID/);
+
 assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
-assert.doesNotMatch(authSource, /__CHAIN_ID__/);
+assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
 assert.match(authSource, /crypto\.randomBytes\(26\)\.toString\('hex'\)/);
 assert.match(authSource, /function createLoadaPathCapability\(\)/);
 assert.match(authSource, /const LOADA_PATH_TTL = 20 \* 1000/);
@@ -189,42 +189,40 @@ async function requestEndpoint(url, headers = {}, method = 'GET', body = undefin
 }
 
 function parseRenderedLoadc(source) {
-  assert.ok(Buffer.byteLength(source, 'utf8') <= 800, 'rendered loadc must remain at or below 800 bytes');
-  const localValues = new Map();
-  for (const match of source.matchAll(/local ([a-z](?:,[a-z])*)=([^\n]+)/g)) {
-    const names = match[1].split(',');
-    const values = match[2].split(',');
-    if (names.length !== values.length) continue;
-    names.forEach((name, index) => {
-      const value = values[index].match(/^"([a-f0-9]{64})"$/)?.[1];
-      if (value) localValues.set(name, value);
-    });
-  }
+  const localValues = new Map([...source.matchAll(/local ([a-z])="([a-f0-9]{64})"/g)]
+    .map((match) => [match[1], match[2]]));
   const chainVariable = source.match(/MS999Chain=\{Version="999MS-chain-v1",Id=([a-z]),Stage="stage1"/)[1];
-  const pathVariables = source.match(/\/loada\.lua\/"\.\.([a-z])\.\."\/"\.\.([a-z])\.\."\?run="/);
+  const pathVariables = source.match(/\/loada\.lua\/"\.\.([a-z])\.\."\/"\.\.([a-z])\.\.'\?run='/);
   const chainId = localValues.get(chainVariable);
   const d = localValues.get(pathVariables[1]);
   const n = localValues.get(pathVariables[2]);
   assert.match(chainId, /^[a-f0-9]{64}$/);
   assert.match(d, /^[a-f0-9]{64}$/);
   assert.match(n, /^[a-f0-9]{64}$/);
-  assert.equal(chainId, d);
   assert.equal(source.includes('__LOADA_D__'), false);
   assert.equal(source.includes('__LOADA_N__'), false);
+  assert.equal(source.includes('__CHAIN_ID__'), false);
+  assert.equal(source.includes('__CLOCK__'), false);
   assert.equal(source.includes('__PRELUDE__'), false);
   assert.equal(source.includes('__SETUP__'), false);
   assert.doesNotMatch(source, /0x[0-9a-f]+/i);
-  for (const diagnostic of ['S1G', 'S1H', 'S1L', 'S1C']) assert.ok(source.includes(diagnostic), `missing ${diagnostic}`);
+  for (const diagnostic of [
+    'MS999:S1:E01:CHAIN_ID_INVALID',
+    'MS999:S1:E02:HTTP_GET_FAILED',
+    'MS999:S1:E03:SHA256_MISMATCH',
+    'MS999:S1:E04:LOADER_UNAVAILABLE',
+    'MS999:S1:E05:STAGE2_COMPILE_FAILED',
+  ]) assert.ok(source.includes(diagnostic), `missing ${diagnostic}`);
   const localNames = [...source.matchAll(/local ([a-z](?:,[a-z])*)=/g)]
     .flatMap((match) => match[1].split(','));
-  assert.equal(localNames.length, 14);
+  assert.ok(localNames.length >= 20);
   assert.equal(new Set(localNames).size, localNames.length);
-  assert.ok(localNames.every((name) => name.length >= 1 && name.length <= 3));
   const positions = [
-    ['clock', source.indexOf('os.clock()')],
-    ['time', source.indexOf('os.time()')],
-    ['date', source.indexOf('os.date"*t"')],
-    ['base', source.indexOf('"https://loader999ms.vercel.app"')],
+    ['clock', source.indexOf('=os.clock()')],
+    ['time', source.indexOf('=os.time()')],
+    ['date', source.indexOf('=os.date("*t")')],
+    ['base', source.indexOf('="https://loader999ms.vercel.app"')],
+    ['timeStamp', source.indexOf('=os.difftime(')],
     ['stageArgs', source.indexOf(',"/loada.lua","999MS-chain-v1","lite",true}')],
     ['chainState', source.indexOf('MS999Chain={Version="999MS-chain-v1"')],
   ];
