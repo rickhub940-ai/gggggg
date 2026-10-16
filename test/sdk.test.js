@@ -72,26 +72,26 @@ for (const [name, source, expectedHash] of runLuaRuntimeArtifacts) {
 assert.doesNotMatch(mainSource, /--/);
 
 assert.equal(loadaSha, '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d');
-assert.match(loadcSource, /if not game:IsLoaded\(\) then game.Loaded:Wait\(\) end/);
-assert.match(loadcSource, /^@y@$/m);
-assert.match(loadcSource, /^@z@$/m);
+assert.match(loadcSource, /if not game:IsLoaded\(\)then game.Loaded:Wait\(\)end/);
+assert.ok(loadcSource.includes('$y;'));
+assert.ok(loadcSource.includes('$z;'));
 assert.doesNotMatch(loadcSource, /\bprint\s*\(/);
 assert.doesNotMatch(loadcSource, /0x[0-9a-f]+/i);
 assert.match(loadcSource, /MS999:S1:E02:HTTP_GET_FAILED/);
 assert.match(loadcSource, /MS999:S1:E03:SHA256_MISMATCH/);
 assert.match(loadcSource, /MS999:S1:E04:LOADER_UNAVAILABLE/);
 assert.match(loadcSource, /MS999:S1:E05:STAGE2_COMPILE_FAILED/);
-assert.match(loadcSource, /xpcall\(function\(\) return game:HttpGet\(@m@\)end,@2@\)/);
-assert.match(loadcSource, /return @u@\(@g@,\.\.\.\)/);
+assert.ok(loadcSource.includes('xpcall(function()return game:HttpGet($m)end,$2)'));
+assert.ok(loadcSource.includes('return $u($g,...)'));
 assert.doesNotMatch(loadcSource, /api\/bootstrap|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
 assert.match(authSource, /function renderLoadcArtifact\(\)/);
 assert.match(authSource, /const LOADC_PRELUDE_LINES/);
 assert.match(authSource, /const LOADC_SETUP_BLOCKS/);
 assert.match(authSource, /function shuffled\(items\)/);
-assert.match(authSource, /os\.tick or tick/);
+assert.match(authSource, /os\.tick\)or\(tick/);
 assert.match(authSource, /table\.freeze/);
-assert.match(authSource, /debug and debug\.traceback/);
+assert.match(authSource, /debug and\(debug\.traceback\)/);
 assert.match(authSource, /MS999:S1:E01:CHAIN_ID_INVALID/);
 
 assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
@@ -203,19 +203,19 @@ function parseRenderedLoadc(source) {
   assert.match(chainId, /^[a-f0-9]{64}$/);
   assert.match(d, /^[a-f0-9]{64}$/);
   assert.match(n, /^[a-f0-9]{64}$/);
-  assert.equal(source.includes('@v@'), false);
-  assert.equal(source.includes('@w@'), false);
-  assert.equal(source.includes('@x@'), false);
-  assert.equal(source.includes('@a@'), false);
-  assert.equal(source.includes('@y@'), false);
-  assert.equal(source.includes('@z@'), false);
-  assert.equal(source.includes('@0@'), false);
-  assert.equal(source.includes('@1@'), false);
-  assert.equal(source.includes('@2@'), false);
-  assert.match(source, /xpcall\(function\(\) return game:HttpGet\([a-z]\)end,[a-z]\)/);
-  assert.ok(source.includes('os.tick or tick'));
+  assert.equal(source.includes('$v'), false);
+  assert.equal(source.includes('$w'), false);
+  assert.equal(source.includes('$x'), false);
+  assert.equal(source.includes('$a'), false);
+  assert.equal(source.includes('$y'), false);
+  assert.equal(source.includes('$z'), false);
+  assert.equal(source.includes('$0'), false);
+  assert.equal(source.includes('$1'), false);
+  assert.equal(source.includes('$2'), false);
+  assert.match(source, /xpcall\(function\(\)return game:HttpGet\([a-z]\)end,[a-z]\)/);
+  assert.ok(source.includes('os.tick)or(tick)'));
   assert.ok(source.includes('table.freeze'));
-  assert.ok(source.includes('debug and debug.traceback'));
+  assert.ok(source.includes('debug and(debug.traceback)'));
   assert.doesNotMatch(source, /0x[0-9a-f]+/i);
   for (const diagnostic of [
     'MS999:S1:E01:CHAIN_ID_INVALID',
@@ -231,7 +231,7 @@ function parseRenderedLoadc(source) {
   const positions = [
     ['clock', source.indexOf('=os.clock()')],
     ['time', source.indexOf('=os.time()')],
-    ['date', source.indexOf('=os.date("*t")')],
+    ['date', source.indexOf('os.date"*t"')],
     ['base', source.indexOf('="https://loader999ms.vercel.app"')],
     ['timeStamp', source.indexOf('=os.difftime(')],
     ['stageArgs', source.indexOf(',"/loada.lua","999MS-chain-v1","lite",true}')],

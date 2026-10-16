@@ -239,38 +239,38 @@ function serveArtifact(req, res, name, url) {
 // and a short-lived d/n capability directly in its source, so no public
 // bootstrap endpoint is needed.
 const LOADC_VARIABLE_TOKENS = Object.freeze([
-  '@a@', '@b@', '@c@', '@d@', '@e@',
-  '@f@', '@g@', '@h@', '@i@', '@j@', '@k@', '@l@',
-  '@m@', '@n@', '@o@', '@p@', '@q@', '@r@',
-  '@s@', '@t@', '@u@', '@0@', '@1@', '@2@',
+  '$a', '$b', '$c', '$d', '$e',
+  '$f', '$g', '$h', '$i', '$j', '$k', '$l',
+  '$m', '$n', '$o', '$p', '$q', '$r',
+  '$s', '$t', '$u', '$0', '$1', '$2',
 ]);
 const LOADC_SHORT_IDENTIFIERS = Object.freeze('abcdefghijklmnopqrstuvwxyz'.split(''));
 const LOADC_PRELUDE_LINES = Object.freeze([
-  'local @a@=os.clock()',
-  'local @b@=os.time()',
-  'local @c@=os.date("*t")',
-  'local @f@="https://loader999ms.vercel.app"',
-  'local @h@="@v@"',
-  'local @i@="@w@"',
-  'local @j@="@x@"',
-  'local @k@="1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d"',
-  'local @l@=(getgenv and getgenv())or _G',
+  'local $a=os.clock()',
+  'local $b=os.time()',
+  'local $c=os.date"*t"',
+  'local $f="https://loader999ms.vercel.app"',
+  'local $h="$v"',
+  'local $i="$w"',
+  'local $j="$x"',
+  'local $k="1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d"',
+  'local $l=(getgenv and(getgenv()))or(_G)',
 ]);
 let lastLoadcLayout = '';
 const LOADC_SETUP_BLOCKS = Object.freeze([
   [
-    'local @0@=(os.tick or tick)()',
-    'local @1@=(table.freeze and table.freeze({c=@a@,t=@0@}))or{c=@a@,t=@0@}',
-    'local @d@=os.difftime(@b@,@b@-1)',
-    'local @e@=table.concat({tostring(@1@.c),tostring(@b@),tostring(@c@.year),tostring(@c@.yday),tostring(@c@.hour),tostring(@c@.min),tostring(@c@.sec),tostring(@1@.t),tostring(@d@)},"-")',
-  ].join('\n'),
-  'local @g@={@f@,"/loada.lua","999MS-chain-v1","lite",true}',
-  'local @2@=(debug and debug.traceback)or function(@2@)return @2@ end',
+    'local $0=((os.tick)or(tick))()',
+    'local $1=(table.freeze and(table.freeze({c=$a,t=$0})))or{c=$a,t=$0}',
+    'local $d=os.difftime($b,$b-1)',
+    'local $e=table.concat({tostring($1.c),tostring($b),tostring($c.year),tostring($c.yday),tostring($c.hour),tostring($c.min),tostring($c.sec),tostring($1.t),tostring($d)},"-")',
+  ].join(';'),
+  'local $g={$f,"/loada.lua","999MS-chain-v1","lite",true}',
+  'local $2=(debug and(debug.traceback))or(function($2)return $2;end)',
   [
-    'if not @j@:match("^[a-f0-9]+$")or #@j@~=64 then error("MS999:S1:E01:CHAIN_ID_INVALID",0)end',
-    '@l@.MS999Chain=nil',
-    '@l@.MS999Chain={Version="999MS-chain-v1",Id=@j@,Stage="stage1",UpdatedAt=tick()}',
-  ].join('\n'),
+    'if not $j:match("^[a-f0-9]+$")or#$j~=64 then error("MS999:S1:E01:CHAIN_ID_INVALID",0)end',
+    '$l.MS999Chain=nil',
+    '$l.MS999Chain={Version="999MS-chain-v1",Id=$j,Stage="stage1",UpdatedAt=tick()}',
+  ].join(';'),
 ]);
 
 function shuffled(items) {
@@ -290,9 +290,9 @@ function renderLoadcArtifact() {
   const capability = createLoadaPathCapability();
   if (!capability) return null;
   const substitutions = new Map([
-    ['@v@', capability.d],
-    ['@w@', capability.n],
-    ['@x@', crypto.randomBytes(32).toString('hex')],
+    ['$v', capability.d],
+    ['$w', capability.n],
+    ['$x', crypto.randomBytes(32).toString('hex')],
   ]);
   let identifiers;
   let prelude;
@@ -307,8 +307,8 @@ function renderLoadcArtifact() {
   lastLoadcLayout = layout;
   LOADC_VARIABLE_TOKENS.forEach((token, index) => substitutions.set(token, identifiers[index]));
   let body = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
-    .replace('@y@', prelude.join('\n'))
-    .replace('@z@', setup.join('\n\n'));
+    .replace('$y', prelude.join(';'))
+    .replace('$z', setup.join(';'));
   for (const [token, value] of substitutions) body = body.replaceAll(token, value);
   return body;
 }
