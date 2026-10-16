@@ -219,7 +219,7 @@ async function requestEndpoint(url, headers = {}, method = 'GET', body = undefin
 }
 
 function unwrapWeAreDevsLoadc(source) {
-  const open = source.match(/^local e=getfenv\(\);local t=setmetatable\(\{\},\{__index=e\}\);local f=assert\(loadstring\(\[(=*)\[/);
+  const open = source.match(/^local e=getfenv\(\);local t=setmetatable\(\{\},\{__index=e\}\);t\.getfenv=function\(\)return t end;t\._ENV=t;local f=assert\(loadstring\(\[(=*)\[/);
   assert.ok(open, 'missing writable WeAreDevs environment wrapper');
   const close = `]${open[1]}]));setfenv(f,t);return f(...)`;
   assert.ok(source.endsWith(close), 'malformed WeAreDevs environment wrapper');

@@ -367,7 +367,7 @@ function wrapWeAreDevsOutput(source) {
   // Prometheus's WeAreDevs output writes temporary values into getfenv(). In
   // Roblox executors that table can be read-only, so execute it in a fresh
   // writable overlay while inheriting all original executor globals.
-  return `local e=getfenv();local t=setmetatable({},{__index=e});local f=assert(loadstring(${asLuaLongString(source)}));setfenv(f,t);return f(...)`;
+  return `local e=getfenv();local t=setmetatable({},{__index=e});t.getfenv=function()return t end;t._ENV=t;local f=assert(loadstring(${asLuaLongString(source)}));setfenv(f,t);return f(...)`;
 }
 
 async function obfuscateWithWeAreDevs(source) {
