@@ -21,12 +21,20 @@ const sessions = new Map();
 const SESSION_TTL = 30 * 60 * 1000;
 const RUNTIME_TTL = 60 * 1000;
 const LOADA_PATH_TTL = 20 * 1000;
-const PUBLIC_ARTIFACTS = Object.freeze({
+const STAGE_PATH_TTL = LOADA_PATH_TTL;
+const ARTIFACT_FILES = Object.freeze({
   loadc: 'loadc.lua',
   loada: 'loada.lua',
   loader: 'loader.lua',
+  payload: 'payload.lua',
   sdk: '999MS-sdk.lua',
 });
+const STAGE_SUCCESSORS = Object.freeze({ loada: 'loader', loader: 'payload' });
+const STAGE_TWO_RAW_SHA256 = '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d';
+// Capability redemption is additionally tracked for the lifetime of a warm
+// function. The signed capability is the cross-instance authority; the map
+// closes accidental/replayed fetches that return to the same instance.
+const redeemedStageCapabilities = new Map();
 
 // ═══ Rate limit ═══
 const rateLimit = new Map();
@@ -92,40 +100,69 @@ function timingSafeStringEquals(supplied, expectedValue) {
 }
 
 // LOADA_PATH_SECRET is optional when the already-required TICKET_SECRET is
-// present. Keeping the capability stateless lets a Stage-1 render and its
-// Stage-2 fetch land on different Vercel instances without a database.
+// present. Capability signatures are stateless, allowing adjacent stages to
+// land on different Vercel instances. Every signature binds both the intended
+// stage and a short-lived, parent-derived capability id.
 function loadaPathSecret() {
   const secret = process.env.LOADA_PATH_SECRET || process.env.TICKET_SECRET;
   return typeof secret === 'string' && secret.length >= 32 ? secret : null;
 }
 
-function signLoadaPath(d, secret) {
-  return crypto.createHmac('sha256', secret).update(`loada-v1:${d}`).digest('hex');
+function capabilityTimestamp(d) {
+  return Number.parseInt(d.slice(0, 12), 16);
+}
+
+function isFreshCapabilityId(d) {
+  if (typeof d !== 'string' || !/^[a-f0-9]{64}$/.test(d)) return false;
+  const issuedAt = capabilityTimestamp(d);
+  const now = Date.now();
+  return Number.isSafeInteger(issuedAt) && issuedAt <= now + 5000 &&
+    now - issuedAt <= STAGE_PATH_TTL;
+}
+
+function signStagePath(stage, d, secret) {
+  return crypto.createHmac('sha256', secret).update(`999MS-stage-v2:${stage}:${d}`).digest('hex');
 }
 
 function createLoadaPathCapability() {
   const secret = loadaPathSecret();
   if (!secret) return null;
-  // d is a server-fresh millisecond timestamp plus 26 cryptographically random
-  // bytes; n is a server-only HMAC of d. Both values differ on every Stage-1 render.
-  const d = Date.now().toString(16).padStart(12, '0') +
-    crypto.randomBytes(26).toString('hex');
-  return { d, n: signLoadaPath(d, secret) };
+  // Root Stage-2 id: current milliseconds plus 26 random bytes. The id is
+  // then deterministically extended by each permitted parent stage below.
+  const d = Date.now().toString(16).padStart(12, '0') + crypto.randomBytes(26).toString('hex');
+  return { stage: 'loada', d, n: signStagePath('loada', d, secret) };
 }
 
-// Stage 2 is available only at /loada.lua/<d>/<n>. d/n are minted into each
-// server-rendered Stage 1, expire quickly, and are independent of the Roblox
-// browser-classification bypass. They are verified without server-side storage.
-function hasLoadaPathCapability(req, url) {
+function deriveSuccessorCapability(parentStage, parentD) {
+  const stage = STAGE_SUCCESSORS[parentStage];
+  const secret = loadaPathSecret();
+  if (!stage || !secret || !isFreshCapabilityId(parentD)) return null;
+  // Same expiry as the parent. HMAC-derived entropy binds this child to that
+  // exact parent capability and prevents a client from minting a later stage.
+  const d = parentD.slice(0, 12) + crypto.createHmac('sha256', secret)
+    .update(`999MS-stage-child-v2:${parentStage}:${stage}:${parentD}`)
+    .digest('hex').slice(0, 52);
+  return { stage, d, n: signStagePath(stage, d, secret) };
+}
+
+function readStageCapability(req, url, stage) {
   const d = req.query?.d || url.searchParams.get('d');
   const n = req.query?.n || url.searchParams.get('n');
-  if (typeof d !== 'string' || !/^[a-f0-9]{64}$/.test(d)) return false;
-  if (typeof n !== 'string' || !/^[a-f0-9]{64}$/.test(n)) return false;
-  const issuedAt = Number.parseInt(d.slice(0, 12), 16);
-  const now = Date.now();
-  if (!Number.isSafeInteger(issuedAt) || issuedAt > now + 5000 || now - issuedAt > LOADA_PATH_TTL) return false;
   const secret = loadaPathSecret();
-  return !!secret && timingSafeStringEquals(n, signLoadaPath(d, secret));
+  if (!isFreshCapabilityId(d) || typeof n !== 'string' || !/^[a-f0-9]{64}$/.test(n) || !secret) return null;
+  if (!timingSafeStringEquals(n, signStagePath(stage, d, secret))) return null;
+  return { stage, d, n };
+}
+
+function consumeStageCapability(capability) {
+  const now = Date.now();
+  for (const [key, expiresAt] of redeemedStageCapabilities) {
+    if (expiresAt < now) redeemedStageCapabilities.delete(key);
+  }
+  const key = `${capability.stage}:${capability.d}`;
+  if (redeemedStageCapabilities.has(key)) return false;
+  redeemedStageCapabilities.set(key, capabilityTimestamp(capability.d) + STAGE_PATH_TTL);
+  return true;
 }
 
 function isBrowserRequest(req) {
@@ -150,24 +187,10 @@ module.exports = async function handler(req, res) {
   const url = new URL(req.url, 'http://x');
   const action = req.query?.action || url.searchParams.get('action');
 
-  // ═══ PAYLOAD (GET) ═══
-  if (action === 'payload') {
-    if (isBrowserRequest(req)) return trapRedirect(res);
-    try {
-      const p = path.join(process.cwd(), 'artifacts', 'payload.lua');
-      const body = fs.readFileSync(p, 'utf8');
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.setHeader('Cache-Control', 'public, max-age=60');
-      return res.status(200).send(body);
-    } catch (e) {
-      console.error('[payload]', e.message);
-      return res.status(404).send('Not Found');
-    }
-  }
-
-  // ═══ PUBLIC ARTIFACTS (GET) ═══
-  // Browser requests are trapped, while executor HTTP requests receive the
-  // raw stage artifact required by the ordered loader chain.
+  // ═══ ARTIFACT DELIVERY (GET) ═══
+  // loadc creates the root capability. Every later chain artifact is served
+  // only after its stage-specific capability validates; browser requests are
+  // trapped before an artifact can be delivered.
   if (action === 'artifact') {
     if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
     if (isBrowserRequest(req)) return trapRedirect(res);
@@ -216,14 +239,56 @@ module.exports = async function handler(req, res) {
   }
 };
 
+function readArtifact(name) {
+  const filename = ARTIFACT_FILES[name];
+  if (!filename) return null;
+  const body = fs.readFileSync(path.join(process.cwd(), 'artifacts', filename), 'utf8');
+  if (name === 'loada' && crypto.createHash('sha256').update(body).digest('hex') !== STAGE_TWO_RAW_SHA256) {
+    throw new Error('Stage-2 raw artifact integrity check failed');
+  }
+  return body;
+}
+
+function stageShim(next) {
+  // This compact, un-obfuscated bridge exists only because the legacy
+  // downstream artifacts are already obfuscated. It swaps their one known
+  // static fetch for the freshly minted successor capability.
+  const target = `https://loader999ms.vercel.app/${next.stage}.lua/${next.d}/${next.n}`;
+  const expectedPath = `/${next.stage}.lua`;
+  return `do local e=getgenv();local o=(syn and syn.request)or(http and http.request)or request or http_request;if type(o)=="function"then local u="${target}";local function r(q,...)if type(q)=="table"and type(q.Url)=="string"and q.Url:find("${expectedPath}",1,true)then q.Url=u end;return o(q,...)end;for _,t in pairs{e,syn,http,_G}do if type(t)=="table"then t.request=r;t.http_request=r end end end end\n`;
+}
+
+function renderChainedArtifact(stage, capability) {
+  const source = readArtifact(stage);
+  if (typeof source !== 'string') return null;
+  const next = deriveSuccessorCapability(stage, capability.d);
+  return next ? `${stageShim(next)}${source}` : null;
+}
+
 function serveArtifact(req, res, name, url) {
-  const filename = PUBLIC_ARTIFACTS[name];
-  if (!filename) return rejectOrTrap(req, res);
-  if (name === 'loada' && !hasLoadaPathCapability(req, url)) return rejectOrTrap(req, res);
+  if (name === 'loadc') {
+    const body = renderLoadcArtifact();
+    if (!body) return res.status(503).send('');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).send(body);
+  }
+  if (name === 'sdk') {
+    try {
+      const body = readArtifact(name);
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).send(body);
+    } catch (error) {
+      console.error('[artifact]', error.message);
+      return res.status(404).send('Not Found');
+    }
+  }
+  if (!Object.hasOwn(STAGE_SUCCESSORS, name) && name !== 'payload') return rejectOrTrap(req, res);
+  const capability = readStageCapability(req, url, name);
+  if (!capability || !consumeStageCapability(capability)) return rejectOrTrap(req, res);
   try {
-    const body = name === 'loadc'
-      ? renderLoadcArtifact()
-      : fs.readFileSync(path.join(process.cwd(), 'artifacts', filename), 'utf8');
+    const body = name === 'payload' ? readArtifact('payload') : renderChainedArtifact(name, capability);
     if (typeof body !== 'string') return res.status(503).send('');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
@@ -253,7 +318,7 @@ const LOADC_PRELUDE_LINES = Object.freeze([
   'local $h="$v"',
   'local $i="$w"',
   'local $j="$x"',
-  'local $k="1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d"',
+  'local $k="@STAGE2_SHA256@"',
   'local $l=(getgenv and(getgenv()))or(_G)',
 ]);
 let lastLoadcLayout = '';
@@ -289,11 +354,14 @@ function shuffledLoadcIdentifiers() {
 function renderLoadcArtifact() {
   const capability = createLoadaPathCapability();
   if (!capability) return null;
+  const stagedSource = renderChainedArtifact('loada', capability);
+  if (!stagedSource) return null;
   const substitutions = new Map([
     ['$v', capability.d],
     ['$w', capability.n],
     ['$x', crypto.randomBytes(32).toString('hex')],
   ]);
+  const stagedSha256 = crypto.createHash('sha256').update(stagedSource).digest('hex');
   let identifiers;
   let prelude;
   let setup;
@@ -308,7 +376,8 @@ function renderLoadcArtifact() {
   LOADC_VARIABLE_TOKENS.forEach((token, index) => substitutions.set(token, identifiers[index]));
   let body = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
     .replace('$y', prelude.join(';'))
-    .replace('$z', setup.join(';'));
+    .replace('$z', setup.join(';'))
+    .replaceAll('@STAGE2_SHA256@', stagedSha256);
   for (const [token, value] of substitutions) body = body.replaceAll(token, value);
   return body;
 }

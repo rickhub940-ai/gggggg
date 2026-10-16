@@ -6,16 +6,49 @@
     }
   },
   "routes": [
-    { "src": "/payload\\.lua",       "dest": "/api/auth?action=payload" },
-    { "src": "/loadc\\.lua",         "dest": "/api/auth?action=artifact&name=loadc" },
-    { "src": "/loada\\.lua/([^/]+)/([^/]+)", "dest": "/api/auth?action=artifact&name=loada&d=$1&n=$2" },
-    { "src": "/loader\\.lua",        "dest": "/api/auth?action=artifact&name=loader" },
-    { "src": "/999MS-sdk\\.lua",     "dest": "/api/auth?action=artifact&name=sdk" },
-    { "src": "/api/verify",            "dest": "/api/auth?action=verify" },
-    { "src": "/api/script",            "dest": "/api/auth?action=script" },
-    { "src": "/api/script-verify",     "dest": "/api/auth?action=script-verify" },
-    { "src": "/api/heartbeat",         "dest": "/api/auth?action=heartbeat" },
-    { "src": "/api/start",             "dest": "/api/auth?action=start" },
-    { "src": "/(.*)",                  "dest": "/api/auth?action=trap" }
+    {
+      "src": "/loadc\\.lua",
+      "dest": "/api/auth?action=artifact&name=loadc"
+    },
+    {
+      "src": "/loada\\.lua/([^/]+)/([^/]+)",
+      "dest": "/api/auth?action=artifact&name=loada&d=$1&n=$2"
+    },
+    {
+      "src": "/loader\\.lua/([^/]+)/([^/]+)",
+      "dest": "/api/auth?action=artifact&name=loader&d=$1&n=$2"
+    },
+    {
+      "src": "/payload\\.lua/([^/]+)/([^/]+)",
+      "dest": "/api/auth?action=artifact&name=payload&d=$1&n=$2"
+    },
+    {
+      "src": "/999MS-sdk\\.lua",
+      "dest": "/api/auth?action=artifact&name=sdk"
+    },
+    {
+      "src": "/api/verify",
+      "dest": "/api/auth?action=verify"
+    },
+    {
+      "src": "/api/script",
+      "dest": "/api/auth?action=script"
+    },
+    {
+      "src": "/api/script-verify",
+      "dest": "/api/auth?action=script-verify"
+    },
+    {
+      "src": "/api/heartbeat",
+      "dest": "/api/auth?action=heartbeat"
+    },
+    {
+      "src": "/api/start",
+      "dest": "/api/auth?action=start"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/auth?action=trap"
+    }
   ]
 }
