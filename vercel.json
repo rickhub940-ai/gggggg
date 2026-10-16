@@ -7,6 +7,10 @@
   },
   "routes": [
     {
+      "src": "/payload\\.lua",
+      "dest": "/api/auth?action=payload"
+    },
+    {
       "src": "/loadc\\.lua",
       "dest": "/api/auth?action=artifact&name=loadc"
     },
@@ -15,12 +19,8 @@
       "dest": "/api/auth?action=artifact&name=loada&d=$1&n=$2"
     },
     {
-      "src": "/loader\\.lua/([^/]+)/([^/]+)",
-      "dest": "/api/auth?action=artifact&name=loader&d=$1&n=$2"
-    },
-    {
-      "src": "/payload\\.lua/([^/]+)/([^/]+)",
-      "dest": "/api/auth?action=artifact&name=payload&d=$1&n=$2"
+      "src": "/loader\\.lua",
+      "dest": "/api/auth?action=artifact&name=loader"
     },
     {
       "src": "/999MS-sdk\\.lua",

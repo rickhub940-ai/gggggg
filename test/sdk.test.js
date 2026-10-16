@@ -98,8 +98,8 @@ assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
 assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
 assert.match(authSource, /crypto\.randomBytes\(26\)\.toString\('hex'\)/);
 assert.match(authSource, /function createLoadaPathCapability\(\)/);
-assert.match(authSource, /function deriveSuccessorCapability\(parentStage, parentD\)/);
 assert.match(authSource, /function consumeStageCapability\(capability\)/);
+assert.doesNotMatch(authSource, /function deriveSuccessorCapability|function stageShim/);
 assert.match(authSource, /const LOADA_PATH_TTL = 20 \* 1000/);
 assert.match(authSource, /const STAGE_TWO_RAW_SHA256/);
 assert.match(authSource, /function wrapWeAreDevsOutput\(source\)/);
@@ -107,17 +107,16 @@ assert.match(authSource, /const clientChallenge = validateClientChallenge\(req\.
 assert.match(authSource, /check: createChallengeResponse\(clientChallenge\.values\)/);
 assert.match(authSource, /scriptBody = scriptBody/);
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap'), false);
-for (const name of ['loadc', 'sdk']) {
+for (const name of ['loadc', 'loader', 'sdk']) {
   assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);
 }
-for (const name of ['loada', 'loader', 'payload']) {
-  assert.equal(vercelConfig.routes.some((entry) => (
-    entry.src === `/${name}\\.lua/([^/]+)/([^/]+)` &&
-    entry.dest === `/api/auth?action=artifact&name=${name}&d=$1&n=$2`
-  )), true, `${name} needs a capability-only route`);
-}
-for (const src of ['/loader\\.lua', '/payload\\.lua']) {
-  assert.equal(vercelConfig.routes.some((entry) => entry.src === src), false, `${src} must not be public`);
+assert.equal(vercelConfig.routes.some((entry) => (
+  entry.src === '/loada\\.lua/([^/]+)/([^/]+)' &&
+  entry.dest === '/api/auth?action=artifact&name=loada&d=$1&n=$2'
+)), true);
+assert.equal(vercelConfig.routes.some((entry) => entry.src === '/payload\\.lua' && entry.dest === '/api/auth?action=payload'), true);
+for (const src of ['/loader\\.lua/([^/]+)/([^/]+)', '/payload\\.lua/([^/]+)/([^/]+)']) {
+  assert.equal(vercelConfig.routes.some((entry) => entry.src === src), false, `${src} must not mint a successor link`);
 }
 assert.equal(vercelConfig.routes.some((entry) => entry.src === '/(.*)' && entry.dest === '/api/auth?action=trap'), true);
 assert.match(mainSource, /Chain\.Stage ~= "script"/);
@@ -345,34 +344,18 @@ function parseRenderedLoadc(source) {
   assert.equal(loadaWrongPathToken.statusCode, 404);
   assert.equal(loadaWithPathToken.statusCode, 200);
   const servedLoadaSha = crypto.createHash('sha256').update(loadaWithPathToken.body).digest('hex');
-  assert.ok(firstLoadc.stage2Sha.includes(servedLoadaSha), 'Stage 1 must pin its exact capability-wrapped Stage 2');
-  assert.match(loadaWithPathToken.body, /^do(?:\n| )local e=/);
-  assert.match(loadaWithPathToken.body, /-- supper_Boom\nreturn \(/);
-  const loaderLink = loadaWithPathToken.body.match(/https:\/\/loader999ms\.vercel\.app\/loader\.lua\/([a-f0-9]{64})\/([a-f0-9]{64})/);
-  assert.ok(loaderLink, 'Stage 2 must carry a fresh Stage-3 capability');
+  assert.equal(servedLoadaSha, loadaSha, 'Stage 1 must pin the raw static Stage 2 artifact');
+  assert.ok(firstLoadc.stage2Sha.includes(servedLoadaSha));
+  assert.match(loadaWithPathToken.body, /^-- supper_Boom\nreturn \(/);
 
   const directStaticLoader = await requestEndpoint('/api/auth?action=artifact&name=loader', executorHeaders);
-  const crossStageLoader = await requestEndpoint(`/api/auth?action=artifact&name=loader&d=${firstLoadc.d}&n=${firstLoadc.n}`, executorHeaders);
-  const loadaReplay = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${firstLoadc.n}`, executorHeaders);
-  assert.equal(directStaticLoader.statusCode, 404);
-  assert.equal(crossStageLoader.statusCode, 404);
-  assert.equal(loadaReplay.statusCode, 404);
-
-  const loaderWithPathToken = await requestEndpoint(`/api/auth?action=artifact&name=loader&d=${loaderLink[1]}&n=${loaderLink[2]}`, executorHeaders);
-  assert.equal(loaderWithPathToken.statusCode, 200);
-  assert.match(loaderWithPathToken.body, /^do(?:\n| )local e=/);
-  const payloadLink = loaderWithPathToken.body.match(/https:\/\/loader999ms\.vercel\.app\/payload\.lua\/([a-f0-9]{64})\/([a-f0-9]{64})/);
-  assert.ok(payloadLink, 'Stage 3 must carry a fresh payload capability');
-
   const directStaticPayload = await requestEndpoint('/api/auth?action=payload', executorHeaders);
-  const payloadWithPathToken = await requestEndpoint(`/api/auth?action=artifact&name=payload&d=${payloadLink[1]}&n=${payloadLink[2]}`, executorHeaders);
-  const loaderReplay = await requestEndpoint(`/api/auth?action=artifact&name=loader&d=${loaderLink[1]}&n=${loaderLink[2]}`, executorHeaders);
-  const payloadReplay = await requestEndpoint(`/api/auth?action=artifact&name=payload&d=${payloadLink[1]}&n=${payloadLink[2]}`, executorHeaders);
-  assert.equal(directStaticPayload.statusCode, 405);
-  assert.equal(payloadWithPathToken.statusCode, 200);
-  assert.match(payloadWithPathToken.body, /^return select\(1,function\(\.\.\.\)/);
-  assert.equal(loaderReplay.statusCode, 404);
-  assert.equal(payloadReplay.statusCode, 404);
+  const loadaReplay = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${firstLoadc.d}&n=${firstLoadc.n}`, executorHeaders);
+  assert.equal(directStaticLoader.statusCode, 200);
+  assert.match(directStaticLoader.body, /^return select\(1,function\(\.\.\.\)/);
+  assert.equal(directStaticPayload.statusCode, 200);
+  assert.match(directStaticPayload.body, /^return select\(1,function\(\.\.\.\)/);
+  assert.equal(loadaReplay.statusCode, 404);
 
   const loadaBrowserPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${secondLoadc.d}&n=${secondLoadc.n}`, { 'user-agent': 'Mozilla/5.0' });
   const expiredLoadcResponse = await requestEndpoint('/api/auth?action=artifact&name=loadc', executorHeaders);
