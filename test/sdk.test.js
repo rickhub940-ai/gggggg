@@ -102,6 +102,7 @@ assert.match(authSource, /function deriveSuccessorCapability\(parentStage, paren
 assert.match(authSource, /function consumeStageCapability\(capability\)/);
 assert.match(authSource, /const LOADA_PATH_TTL = 20 \* 1000/);
 assert.match(authSource, /const STAGE_TWO_RAW_SHA256/);
+assert.match(authSource, /function wrapWeAreDevsOutput\(source\)/);
 assert.match(authSource, /const clientChallenge = validateClientChallenge\(req\.body\)/);
 assert.match(authSource, /check: createChallengeResponse\(clientChallenge\.values\)/);
 assert.match(authSource, /scriptBody = scriptBody/);
@@ -217,6 +218,14 @@ async function requestEndpoint(url, headers = {}, method = 'GET', body = undefin
   return response;
 }
 
+function unwrapWeAreDevsLoadc(source) {
+  const open = source.match(/^local e=getfenv\(\);local t=setmetatable\(\{\},\{__index=e\}\);local f=assert\(loadstring\(\[(=*)\[/);
+  assert.ok(open, 'missing writable WeAreDevs environment wrapper');
+  const close = `]${open[1]}]));setfenv(f,t);return f(...)`;
+  assert.ok(source.endsWith(close), 'malformed WeAreDevs environment wrapper');
+  return source.slice(open[0].length, -close.length);
+}
+
 function parseRenderedLoadc(source) {
   const localValues = new Map([...source.matchAll(/local ([a-z])="([a-f0-9]{64})"/g)]
     .map((match) => [match[1], match[2]]));
@@ -313,11 +322,12 @@ function parseRenderedLoadc(source) {
   assert.equal(secondExecutorArtifact.statusCode, 200);
   assert.equal(robloxArtifact.statusCode, 200);
   assert.equal(executorArtifact.body.startsWith('--[['), false, 'WeAreDevs banner comment must be removed');
+  assert.doesNotMatch(executorArtifact.body, /--\[\[\s*v[\d.]+\s+https?:\/\/wearedevs\.net\/obfuscator/i);
   assert.equal(obfuscationInputs.length, 3, 'each permitted loadc request must be obfuscated');
   assert.ok(obfuscationInputs.every((source) => !source.startsWith('--')), 'source submitted to WeAreDevs must be comment-free');
-  const firstLoadc = parseRenderedLoadc(executorArtifact.body);
-  const secondLoadc = parseRenderedLoadc(secondExecutorArtifact.body);
-  const robloxLoadc = parseRenderedLoadc(robloxArtifact.body);
+  const firstLoadc = parseRenderedLoadc(unwrapWeAreDevsLoadc(executorArtifact.body));
+  const secondLoadc = parseRenderedLoadc(unwrapWeAreDevsLoadc(secondExecutorArtifact.body));
+  const robloxLoadc = parseRenderedLoadc(unwrapWeAreDevsLoadc(robloxArtifact.body));
   assert.notEqual(firstLoadc.chainId, secondLoadc.chainId);
   assert.notEqual(firstLoadc.d, secondLoadc.d);
   assert.notEqual(firstLoadc.n, secondLoadc.n);
@@ -366,7 +376,7 @@ function parseRenderedLoadc(source) {
 
   const loadaBrowserPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${secondLoadc.d}&n=${secondLoadc.n}`, { 'user-agent': 'Mozilla/5.0' });
   const expiredLoadcResponse = await requestEndpoint('/api/auth?action=artifact&name=loadc', executorHeaders);
-  const expiredLoadc = parseRenderedLoadc(expiredLoadcResponse.body);
+  const expiredLoadc = parseRenderedLoadc(unwrapWeAreDevsLoadc(expiredLoadcResponse.body));
   const actualNow = Date.now;
   Date.now = () => actualNow() + 20001;
   const loadaExpiredPath = await requestEndpoint(`/api/auth?action=artifact&name=loada&d=${expiredLoadc.d}&n=${expiredLoadc.n}`, executorHeaders);

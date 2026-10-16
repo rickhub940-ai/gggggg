@@ -357,6 +357,19 @@ function stripWeAreDevsBanner(source) {
   return source.replace(/^\s*--\[\[\s*v[\d.]+\s+https?:\/\/wearedevs\.net\/obfuscator\s*\]\]\s*/i, '');
 }
 
+function asLuaLongString(source) {
+  let equals = '';
+  while (source.includes(`]${equals}]`)) equals += '=';
+  return `[${equals}[${source}]${equals}]`;
+}
+
+function wrapWeAreDevsOutput(source) {
+  // Prometheus's WeAreDevs output writes temporary values into getfenv(). In
+  // Roblox executors that table can be read-only, so execute it in a fresh
+  // writable overlay while inheriting all original executor globals.
+  return `local e=getfenv();local t=setmetatable({},{__index=e});local f=assert(loadstring(${asLuaLongString(source)}));setfenv(f,t);return f(...)`;
+}
+
 async function obfuscateWithWeAreDevs(source) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), WEAREDEVS_TIMEOUT_MS);
@@ -371,7 +384,7 @@ async function obfuscateWithWeAreDevs(source) {
     if (!response.ok || payload?.success !== true || typeof payload.obfuscated !== 'string' || !payload.obfuscated) {
       throw new Error(`WeAreDevs rejected Stage 1 (${response.status})`);
     }
-    return stripWeAreDevsBanner(payload.obfuscated);
+    return wrapWeAreDevsOutput(stripWeAreDevsBanner(payload.obfuscated));
   } catch (error) {
     console.error('[loadc-obfuscate]', error.message);
     return null;
