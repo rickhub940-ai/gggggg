@@ -178,6 +178,23 @@ assert.equal(verifyRuntimeProof({ ...proof, ticketPayload: { ...decodedTicketOne
 // Keep this test-only secret active through the endpoint tests below.
 
 const previousLoadaPathSecret = process.env.LOADA_PATH_SECRET;
+const originalFetch = global.fetch;
+const obfuscationInputs = [];
+global.fetch = async (url, options) => {
+  assert.equal(url, 'https://wearedevs.net/api/obfuscate');
+  assert.equal(options.method, 'POST');
+  assert.equal(options.headers['Content-Type'], 'application/json');
+  const request = JSON.parse(options.body);
+  assert.equal(typeof request.script, 'string');
+  obfuscationInputs.push(request.script);
+  return {
+    ok: true,
+    status: 200,
+    async json() {
+      return { success: true, obfuscated: `--[[ v1.0.0 https://wearedevs.net/obfuscator ]] ${request.script}` };
+    },
+  };
+};
 process.env.LOADA_PATH_SECRET = 'test-loada-path-secret-with-at-least-thirty-two-characters';
 
 async function requestEndpoint(url, headers = {}, method = 'GET', body = undefined) {
@@ -295,6 +312,9 @@ function parseRenderedLoadc(source) {
   assert.equal(executorArtifact.statusCode, 200);
   assert.equal(secondExecutorArtifact.statusCode, 200);
   assert.equal(robloxArtifact.statusCode, 200);
+  assert.equal(executorArtifact.body.startsWith('--[['), false, 'WeAreDevs banner comment must be removed');
+  assert.equal(obfuscationInputs.length, 3, 'each permitted loadc request must be obfuscated');
+  assert.ok(obfuscationInputs.every((source) => !source.startsWith('--')), 'source submitted to WeAreDevs must be comment-free');
   const firstLoadc = parseRenderedLoadc(executorArtifact.body);
   const secondLoadc = parseRenderedLoadc(secondExecutorArtifact.body);
   const robloxLoadc = parseRenderedLoadc(robloxArtifact.body);
@@ -364,12 +384,14 @@ function parseRenderedLoadc(source) {
   assert.equal(robloxUnknownPath.headers.Location, undefined);
   if (previousLoadaPathSecret === undefined) delete process.env.LOADA_PATH_SECRET;
   else process.env.LOADA_PATH_SECRET = previousLoadaPathSecret;
+  global.fetch = originalFetch;
   if (previousTicketSecret === undefined) delete process.env.TICKET_SECRET;
   else process.env.TICKET_SECRET = previousTicketSecret;
   console.log('PASS 999MS Server SDK, per-request loadc capabilities, and browser trap tests');
 })().catch((error) => {
   if (previousLoadaPathSecret === undefined) delete process.env.LOADA_PATH_SECRET;
   else process.env.LOADA_PATH_SECRET = previousLoadaPathSecret;
+  global.fetch = originalFetch;
   if (previousTicketSecret === undefined) delete process.env.TICKET_SECRET;
   else process.env.TICKET_SECRET = previousTicketSecret;
   console.error(error);

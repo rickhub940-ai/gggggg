@@ -31,6 +31,8 @@ const ARTIFACT_FILES = Object.freeze({
 });
 const STAGE_SUCCESSORS = Object.freeze({ loada: 'loader', loader: 'payload' });
 const STAGE_TWO_RAW_SHA256 = '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d';
+const WEAREDEVS_OBFUSCATE_URL = 'https://wearedevs.net/api/obfuscate';
+const WEAREDEVS_TIMEOUT_MS = 8 * 1000;
 // Capability redemption is additionally tracked for the lifetime of a warm
 // function. The signed capability is the cross-instance authority; the map
 // closes accidental/replayed fetches that return to the same instance.
@@ -195,7 +197,7 @@ module.exports = async function handler(req, res) {
     if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
     if (isBrowserRequest(req)) return trapRedirect(res);
     const name = req.query?.name || url.searchParams.get('name');
-    return serveArtifact(req, res, name, url);
+    return await serveArtifact(req, res, name, url);
   }
 
   if (action === 'trap') return rejectOrTrap(req, res);
@@ -265,9 +267,9 @@ function renderChainedArtifact(stage, capability) {
   return next ? `${stageShim(next)}${source}` : null;
 }
 
-function serveArtifact(req, res, name, url) {
+async function serveArtifact(req, res, name, url) {
   if (name === 'loadc') {
-    const body = renderLoadcArtifact();
+    const body = await renderLoadcArtifact();
     if (!body) return res.status(503).send('');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
@@ -351,7 +353,34 @@ function shuffledLoadcIdentifiers() {
   return shuffled(LOADC_SHORT_IDENTIFIERS).slice(0, LOADC_VARIABLE_TOKENS.length);
 }
 
-function renderLoadcArtifact() {
+function stripWeAreDevsBanner(source) {
+  return source.replace(/^\s*--\[\[\s*v[\d.]+\s+https?:\/\/wearedevs\.net\/obfuscator\s*\]\]\s*/i, '');
+}
+
+async function obfuscateWithWeAreDevs(source) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), WEAREDEVS_TIMEOUT_MS);
+  try {
+    const response = await fetch(WEAREDEVS_OBFUSCATE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ script: source }),
+      signal: controller.signal,
+    });
+    const payload = await response.json();
+    if (!response.ok || payload?.success !== true || typeof payload.obfuscated !== 'string' || !payload.obfuscated) {
+      throw new Error(`WeAreDevs rejected Stage 1 (${response.status})`);
+    }
+    return stripWeAreDevsBanner(payload.obfuscated);
+  } catch (error) {
+    console.error('[loadc-obfuscate]', error.message);
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function renderLoadcArtifact() {
   const capability = createLoadaPathCapability();
   if (!capability) return null;
   const stagedSource = renderChainedArtifact('loada', capability);
@@ -374,12 +403,12 @@ function renderLoadcArtifact() {
   } while (layout === lastLoadcLayout);
   lastLoadcLayout = layout;
   LOADC_VARIABLE_TOKENS.forEach((token, index) => substitutions.set(token, identifiers[index]));
-  let body = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
+  let source = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
     .replace('$y', prelude.join(';'))
     .replace('$z', setup.join(';'))
     .replaceAll('@STAGE2_SHA256@', stagedSha256);
-  for (const [token, value] of substitutions) body = body.replaceAll(token, value);
-  return body;
+  for (const [token, value] of substitutions) source = source.replaceAll(token, value);
+  return obfuscateWithWeAreDevs(source);
 }
 
 // ═══ /api/verify ═══
