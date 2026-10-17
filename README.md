@@ -71,3 +71,12 @@ PORT=10000 node server.js
 session (`sessionId`, `idleMs`) และสั่ง `notice` ถึง client ได้จริง
 
 จุดย้อนกลับ: tag `pre-source-package` ใน repo `whilstkey` และ `loader999mss-realtime`
+
+## Git → Vercel auto-deploy (เชื่อมแล้ว)
+
+โปรเจกต์ `loader999mss` ผูกกับ repo **`rickhub940-ai/whilstkey`** สาขา `main` แล้ว
+→ `git push origin main` = Vercel build + deploy production ให้เอง
+(ยืนยันแล้ว: commit `7883553` ถูก build และขึ้น production โดยไม่ได้สั่ง deploy ด้วยมือ)
+
+หมายเหตุ: โฟลเดอร์ `render-package/` อยู่ใน repo **`loader999mss-realtime`** แยกต่างหาก
+(Render deploy จาก repo นั้น)
