@@ -96,6 +96,8 @@
   .tag{display:inline-flex;align-items:center;gap:6px;font-size:.74rem;padding:3px 9px;border-radius:999px;
     border:1px solid rgba(62,230,176,.28);background:rgba(62,230,176,.09);color:#9df0d2;font-weight:600}
   .tag.script{border-color:rgba(56,214,255,.28);background:rgba(56,214,255,.09);color:#a9ebff}
+  .tag.warn{border-color:rgba(255,198,92,.35);background:rgba(255,198,92,.1);color:#ffd899}
+  .tag.bad{border-color:rgba(255,107,129,.35);background:rgba(255,107,129,.1);color:#ffb3bf}
   .hint{font-size:.8rem;color:var(--muted);margin:0 0 12px}
   .row{display:flex;gap:10px}
   .row > *{flex:1}
@@ -214,6 +216,16 @@
           <button class="btn btn-sm btn-ghost" id="clearLog" type="button">ล้าง</button>
         </div>
         <div class="card-b"><div id="log"></div></div>
+      </section>
+
+      <section class="card">
+        <div class="card-h">
+          <h2>คำขอที่เข้ามาล่าสุด</h2>
+          <span class="pill" id="traceCount">0</span>
+          <span class="spacer"></span>
+          <span class="pill hide-sm">จาก executor / เบราว์เซอร์</span>
+        </div>
+        <div id="traceHost"><div class="empty">ยังไม่มีข้อมูล</div></div>
       </section>
     </div>
 
@@ -385,6 +397,11 @@
       icon.classList.remove('rotate');
     });
 
+    api('/api/control/traffic', { limit: 40 }).then(function (result) {
+      if (result.status !== 200 || !result.data) return;
+      renderTraffic(result.data.traffic || []);
+    }).catch(function () {});
+
     api('/api/control/bans').then(function (result) {
       if (result.status !== 200) return;
       var data = result.data || {};
@@ -442,6 +459,33 @@
     host.innerHTML = '<div style="overflow:auto"><table><thead><tr>' +
       '<th>Client</th><th>สคริปต์</th><th class="hide-sm">HWID / ล่าสุด</th><th>การจัดการ</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  function statusClass(code) {
+    if (code >= 200 && code < 300) return 'tag';
+    if (code >= 300 && code < 400) return 'tag warn';
+    return 'tag bad';
+  }
+
+  function renderTraffic(list) {
+    $('traceCount').textContent = list.length + ' รายการ';
+    var host = $('traceHost');
+    if (!list.length) {
+      host.innerHTML = '<div class="empty">ยังไม่มีคำขอ — ให้คนรัน loadc.lua แล้วกดรีเฟรช</div>';
+      return;
+    }
+    var rows = list.map(function (row) {
+      var time = new Date(row.ts).toLocaleTimeString('th-TH');
+      var label = (row.method || 'GET') + ' ' + (row.path || '');
+      if (row.name) label += '  (' + row.name + ')';
+      return '<tr>' +
+        '<td class="mono" style="font-size:.76rem;white-space:nowrap">' + esc(time) + '</td>' +
+        '<td><div class="ident"><b>' + esc(label) + '</b><span>' + esc(row.host || '') + ' · ' + esc((row.ua || '').slice(0, 34)) + '</span></div></td>' +
+        '<td><span class="' + statusClass(row.status) + '">' + esc(String(row.status)) + '</span></td>' +
+      '</tr>';
+    }).join('');
+    host.innerHTML = '<div style="overflow:auto;max-height:260px"><table><thead><tr>' +
+      '<th>เวลา</th><th>คำขอ</th><th>สถานะ</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
   function renderBans(lists) {

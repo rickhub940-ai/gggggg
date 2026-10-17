@@ -47,6 +47,10 @@
       "dest": "/api/auth?action=control-bans"
     },
     {
+      "src": "/api/control/traffic",
+      "dest": "/api/auth?action=control-traffic"
+    },
+    {
       "src": "/api/bootstrap",
       "dest": "/api/auth?action=bootstrap"
     },

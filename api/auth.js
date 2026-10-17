@@ -28,9 +28,7 @@ const ARTIFACT_FILES = Object.freeze({
   payload: 'payload.lua',
   sdk: '999MS-sdk.lua',
 });
-const STAGE_TWO_RAW_SHA256 = '1724d4c3006c7fe68e73f41f7895b848f94c9618f2ddbb7b6f704d4e4927903d';
-const WEAREDEVS_OBFUSCATE_URL = 'https://wearedevs.net/api/obfuscate';
-const WEAREDEVS_TIMEOUT_MS = 8 * 1000;
+const STAGE_TWO_RAW_SHA256 = '2c6a584d79164980356212f691af1e01f0a5df0164e2f445c9427f8296c536ec';
 // Capability redemption is additionally tracked for the lifetime of a warm
 // function. The signed capability is the cross-instance authority; the map
 // closes accidental/replayed fetches that return to the same instance.
@@ -170,7 +168,13 @@ async function gatewayRequest(pathname, options = {}) {
   }
 }
 
-const CONTROL_ACTIONS = new Set(['control-sessions', 'control-command', 'control-bans']);
+const CONTROL_ACTIONS = new Set(['control-sessions', 'control-command', 'control-bans', 'control-traffic']);
+
+// Ring buffer of the last 200 requests so the panel can see what a real
+// executor actually fetched and which status it received. No keys, HWIDs,
+// tickets or bodies are stored: only method/path/host/UA/status/timing.
+const trafficLog = [];
+const TRAFFIC_MAX = 200;
 
 function timingSafeStringEquals(supplied, expectedValue) {
   if (typeof supplied !== 'string' || typeof expectedValue !== 'string') return false;
@@ -264,6 +268,30 @@ module.exports = async function handler(req, res) {
   const url = new URL(req.url, 'http://x');
   const action = req.query?.action || url.searchParams.get('action');
 
+  // ── request trace (see /api/control/traffic) ──
+  const trace = {
+    ts: Date.now(),
+    method: req.method,
+    path: url.pathname,
+    action: action || null,
+    name: req.query?.name || url.searchParams.get('name') || null,
+    host: String(req.headers['x-forwarded-host'] || req.headers.host || ''),
+    ua: String(req.headers['user-agent'] || '').slice(0, 80),
+    status: 0,
+    ms: 0,
+  };
+  trafficLog.push(trace);
+  if (trafficLog.length > TRAFFIC_MAX) trafficLog.shift();
+  const finish = (code) => { trace.status = trace.status || code; trace.ms = Date.now() - trace.ts; };
+  const rawStatus = res.status.bind(res);
+  res.status = (code) => { finish(code); return rawStatus(code); };
+  for (const methodName of ['send', 'json', 'end']) {
+    if (typeof res[methodName] === 'function') {
+      const raw = res[methodName].bind(res);
+      res[methodName] = (...args) => { finish(200); return raw(...args); };
+    }
+  }
+
   // Legacy chain id endpoint. The Oct-14 generation of loadc.lua asked here for
   // a 64-hex chain id before fetching Stage 2; a cached copy of that bootstrapper
   // still runs on some executors. It returns no secrets and no session state.
@@ -285,6 +313,11 @@ module.exports = async function handler(req, res) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     if (req.method !== 'POST') return res.status(405).json({ ok: false, reason: 'method' });
     if (!isAdminRequest(req)) return res.status(401).json({ ok: false, reason: 'unauthorized' });
+
+    if (action === 'control-traffic') {
+      const limit = Math.min(Number(req.body && req.body.limit) || 100, TRAFFIC_MAX);
+      return res.status(200).json({ ok: true, count: trafficLog.length, traffic: trafficLog.slice(-limit).reverse() });
+    }
 
     if (action === 'control-sessions') {
       const gateway = await gatewayRequest('/admin/sessions');
@@ -339,7 +372,9 @@ module.exports = async function handler(req, res) {
     if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
     if (trapBrowserArtifacts() && isBrowserRequest(req)) return trapRedirect(res);
     try {
-      const body = readArtifact('payload');
+      let body = readArtifact('payload');
+      if (typeof body !== 'string') return res.status(404).send('Not Found');
+      if (body.includes('@BASE_URL@')) body = body.replaceAll('@BASE_URL@', requestOrigin(req));
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store');
       return res.status(200).send(body);
@@ -440,8 +475,15 @@ async function serveArtifact(req, res, name, url, origin) {
     return rejectOrTrap(req, res);
   }
   try {
-    const body = readArtifact(name);
+    let body = readArtifact(name);
     if (typeof body !== 'string') return res.status(503).send('');
+    // Stage 2 is integrity-pinned on the raw bytes above, so its placeholder is
+    // replaced only after that check. Stages 3/4 are templated the same way.
+    // This keeps a renamed project or preview deployment from pointing the
+    // chain at a host that no longer exists.
+    if (name === 'loada') {
+      body = body.replaceAll('@BASE_URL@', origin || '');
+    } else if (body.includes('@BASE_URL@')) body = body.replaceAll('@BASE_URL@', origin || '');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).send(body);
@@ -452,127 +494,24 @@ async function serveArtifact(req, res, name, url, origin) {
 }
 
 // ═══ Dynamic Stage-1 renderer ═══
-// /loadc.lua is generated per executor request. It receives a fresh chain ID
-// and a short-lived d/n capability directly in its source, so no public
-// bootstrap endpoint is needed.
-const LOADC_VARIABLE_TOKENS = Object.freeze([
-  '$a', '$b', '$c', '$d', '$e',
-  '$f', '$g', '$h', '$i', '$j', '$k', '$l',
-  '$m', '$n', '$o', '$p', '$q', '$r',
-  '$s', '$t', '$u', '$0', '$1', '$2',
-]);
-const LOADC_SHORT_IDENTIFIERS = Object.freeze('abcdefghijklmnopqrstuvwxyz'.split(''));
-const LOADC_PRELUDE_LINES = Object.freeze([
-  'local $a=os.clock()',
-  'local $b=os.time()',
-  'local $c=os.date"*t"',
-  'local $f="@BASE_URL@"',
-  'local $h="$v"',
-  'local $i="$w"',
-  'local $j="$x"',
-  'local $k="@STAGE2_SHA256@"',
-  'local $l=(getgenv and(getgenv()))or(_G)',
-]);
-let lastLoadcLayout = '';
-const LOADC_SETUP_BLOCKS = Object.freeze([
-  [
-    'local $0=((os.tick)or(tick))()',
-    'local $1=(table.freeze and(table.freeze({c=$a,t=$0})))or{c=$a,t=$0}',
-    'local $d=os.difftime($b,$b-1)',
-    'local $e=table.concat({tostring($1.c),tostring($b),tostring($c.year),tostring($c.yday),tostring($c.hour),tostring($c.min),tostring($c.sec),tostring($1.t),tostring($d)},"-")',
-  ].join(';'),
-  'local $g={$f,"/loada.lua","999MS-chain-v1","lite",true}',
-  'local $2=(debug and(debug.traceback))or(function($2)return $2;end)',
-  [
-    'if not $j:match("^[a-f0-9]+$")or#$j~=64 then error("MS999:S1:E01:CHAIN_ID_INVALID",0)end',
-    '$l.MS999Chain=nil',
-    '$l.MS999Chain={Version="999MS-chain-v1",Id=$j,Stage="stage1",UpdatedAt=tick()}',
-  ].join(';'),
-]);
-
-function shuffled(items) {
-  const values = [...items];
-  for (let index = values.length - 1; index > 0; index -= 1) {
-    const swapIndex = crypto.randomInt(index + 1);
-    [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
-  }
-  return values;
-}
-
-function shuffledLoadcIdentifiers() {
-  return shuffled(LOADC_SHORT_IDENTIFIERS).slice(0, LOADC_VARIABLE_TOKENS.length);
-}
-
-function stripWeAreDevsBanner(source) {
-  return source.replace(/^\s*--\[\[\s*v[\d.]+\s+https?:\/\/wearedevs\.net\/obfuscator\s*\]\]\s*/i, '');
-}
-
-function asLuaLongString(source) {
-  let equals = '';
-  while (source.includes(`]${equals}]`)) equals += '=';
-  return `[${equals}[${source}]${equals}]`;
-}
-
-function wrapWeAreDevsOutput(source) {
-  // Prometheus's WeAreDevs output writes temporary values into getfenv(). In
-  // Roblox executors that table can be read-only, so execute it in a fresh
-  // writable overlay while inheriting all original executor globals.
-  return `local e=getfenv();local t=setmetatable({},{__index=e});t.getfenv=function()return t end;t._ENV=t;local f=assert(loadstring(${asLuaLongString(source)}));setfenv(f,t);return f(...)`;
-}
-
-async function obfuscateWithWeAreDevs(source) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), WEAREDEVS_TIMEOUT_MS);
-  try {
-    const response = await fetch(WEAREDEVS_OBFUSCATE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script: source }),
-      signal: controller.signal,
-    });
-    const payload = await response.json();
-    if (!response.ok || payload?.success !== true || typeof payload.obfuscated !== 'string' || !payload.obfuscated) {
-      throw new Error(`WeAreDevs rejected Stage 1 (${response.status})`);
-    }
-    return wrapWeAreDevsOutput(stripWeAreDevsBanner(payload.obfuscated));
-  } catch (error) {
-    console.error('[loadc-obfuscate]', error.message);
-    return null;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function renderLoadcArtifact(origin = 'https://loader999mss.vercel.app') {
+// /loadc.lua is rendered from the readable template in artifacts/loadc.lua.
+// No obfuscator is involved: the source is plain Lua that a user can audit.
+function renderLoadcArtifact(origin = 'https://loader999mss.vercel.app') {
   const capability = createLoadaPathCapability();
   if (!capability) return null;
-  const stagedSource = readArtifact('loada');
-  if (!stagedSource) return null;
-  const substitutions = new Map([
-    ['$v', capability.d],
-    ['$w', capability.n],
-    ['$x', crypto.randomBytes(32).toString('hex')],
-  ]);
+  const stagedRaw = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loada.lua'), 'utf8');
+  if (!stagedRaw) return null;
+  const chainId = crypto.randomBytes(32).toString('hex');
+  // Stage 1 hashes exactly the bytes Stage 2 will receive, with the placeholder
+  // already resolved for this request's host.
+  const stagedSource = stagedRaw.replaceAll('@BASE_URL@', origin);
   const stagedSha256 = crypto.createHash('sha256').update(stagedSource).digest('hex');
-  let identifiers;
-  let prelude;
-  let setup;
-  let layout;
-  do {
-    identifiers = shuffledLoadcIdentifiers();
-    prelude = shuffled(LOADC_PRELUDE_LINES);
-    setup = shuffled(LOADC_SETUP_BLOCKS);
-    layout = `${identifiers.join('')}:${prelude.join('|')}:${setup.join('|')}`;
-  } while (layout === lastLoadcLayout);
-  lastLoadcLayout = layout;
-  LOADC_VARIABLE_TOKENS.forEach((token, index) => substitutions.set(token, identifiers[index]));
-  let source = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
-    .replace('$y', prelude.join(';'))
-    .replace('$z', setup.join(';'))
-    .replaceAll('@STAGE2_SHA256@', stagedSha256)
-    .replaceAll('@BASE_URL@', origin);
-  for (const [token, value] of substitutions) source = source.replaceAll(token, value);
-  return obfuscateWithWeAreDevs(source);
+  return fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
+    .replaceAll('__CHAIN_ID__', chainId)
+    .replaceAll('__CAP_D__', capability.d)
+    .replaceAll('__CAP_N__', capability.n)
+    .replaceAll('__STAGE2_SHA256__', stagedSha256)
+    .replaceAll('__BASE_URL__', origin);
 }
 
 // ═══ /api/verify ═══

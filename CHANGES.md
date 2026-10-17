@@ -160,3 +160,36 @@ local BASE_URL = "https://keysytemdemo.vercel.app"
 ## หมายเหตุ
 `payload.lua` รุ่นที่ deploy เรียก `/api/verify` → `/api/script` (Data envelope + XOR) →
 `/api/start` ด้วยฟิลด์ที่ตรงกับ handler ปัจจุบันทุกตัว จึงไม่ต้อง regenerate artifact
+
+---
+
+# 2026-10-17 (รอบ 5) — ใช้ซอร์สจาก Git ตรง ๆ ไม่ obfuscate
+
+## สิ่งที่เปลี่ยน
+Stage ทั้ง 4 ถูก build จาก `source/*.lua` (Lua อ่านได้ 100%) แทน blob ที่ obfuscate:
+
+| ไฟล์ | ที่มา | ขนาด |
+|---|---|---|
+| `source/savecheck.lua` → `artifacts/loada.lua` | commit `d50092c` (`artifacts/savecheck.lua`) | 8.0 KB |
+| `source/loader.lua` → `artifacts/loader.lua` | commit `d50092c` (`artifacts/loader.lua`) | 20.4 KB |
+| `source/payload.lua` → `artifacts/payload.lua` | commit `d50092c` (`artifacts/payload.lua`) | 30.7 KB |
+| `source/loadc.template.lua` → `artifacts/loadc.lua` | เขียนใหม่ให้อ่านได้ | 1.5 KB |
+
+- `node source/build.js` = build ทั้ง chain (ไม่มี network call, ไม่มี obfuscator)
+- ลบ `obfuscateWithWeAreDevs()` / `wrapWeAreDevsOutput()` ออกจาก `api/auth.js` แล้ว
+  → `/loadc.lua` ตอบใน ~50 ms ไม่ต้องรอ WeAreDevs 8 วิ (แก้ H5 จากรีวิวแรก)
+- ทุก stage ใช้ `@BASE_URL@` แล้วถูกแทนด้วย host ที่ executor เรียกเข้ามาจริง
+  (`/loadc.lua`, `/loada.lua/:d/:n`, `/loader.lua`, `/payload.lua`)
+- Stage 1 คำนวณ SHA-256 ของ Stage 2 **หลัง** แทน host แล้ว จึงตรงกันเป๊ะทุกโฮสต์
+- `getgenv().script` ไม่บังคับแล้ว — ค่าเริ่มต้นเป็น `"main"` (สั่ง override ได้เหมือนเดิม)
+- test อัปเดต: ตรวจว่า artifact ทุกตัวอ่านได้, มี placeholder, ไม่มี `return select(1,function(...)`
+  และรหัส capability/chain id หมุนใหม่ทุก request
+
+## ตรวจบน production
+```
+/loadc.lua            1803 B  readable  · chain id + capability ใหม่ทุกครั้ง
+/loada.lua/<d>/<n>    8085 B  readable  · sha256 ตรงกับที่ Stage 1 pin (6a19e3f9…)
+/loader.lua          20795 B  readable
+/payload.lua         30881 B  readable
+loadstring() syntax check ผ่านทั้ง 4 ไฟล์ (luajit)
+```
