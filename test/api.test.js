@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const fs = require('node:fs');
 
 const port = 30_000 + (process.pid % 10_000);
 const adminPort = port + 1;
@@ -138,6 +139,15 @@ async function main() {
   });
   assert.equal(forgedVerify.status, 400);
   assert.equal((await forgedVerify.json()).error, 'RNG integers rejected');
+
+  // Regression: the shipped main.lua must never kick for a slow/missing
+  // realtime link. Only an explicit admin disconnect may kick.
+  const mainLua = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
+  assert.equal(/Realtime connection timeout/.test(mainLua), false,
+    'main.lua must not kick on realtime timeout');
+  assert.equal(/Realtime connection lost/.test(mainLua), false,
+    'main.lua must not kick when the realtime link drops');
+  assert.match(mainLua, /continuing without it/);
 
   console.log('PASS API realtime ticket binding');
 }

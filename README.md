@@ -89,3 +89,16 @@ session (`sessionId`, `idleMs`) และสั่ง `notice` ถึง client 
 แก้: gate ที่ `/api/verify` บังคับเฉพาะเมื่อคำขอมี field `Rng1..Rng5/RngFloat` จริง
 (`challengeSupplied`) และตอบ `check` เฉพาะเมื่อคำนวณได้ — `/api/script` ยังตรวจ RNG เข้มเหมือนเดิม
 เพิ่ม regression test ใน `test/api.test.js`
+
+## 2026-10-17 — แก้ MS9-41AC183F ("Realtime connection timeout")
+
+รหัสเตะ `MS9-41AC183F` = `[999MS] Realtime connection timeout`
+สาเหตุ: `scripts/main.lua` ตั้ง `task.delay(10, Kick(...))` **ก่อน** ตรวจว่ามี WebSocket API หรือไม่
+→ executor ที่ไม่มี WS (หรือ gateway Render ยัง cold start) ถูกเตะหลัง 10 วิทุกครั้งที่คีย์ผ่าน
+
+แก้: realtime เป็น best-effort
+- ไม่มี WS → ข้าม ไม่เตะ
+- ticket ไม่ได้/ถูกปฏิเสธ → ข้าม ไม่เตะ
+- handshake ไม่เสร็จใน 60 วิ → หยุดเงียบ ๆ ไม่เตะ
+- heartbeat ขาด 3 ครั้งติด → หยุด ไม่เตะ
+- **ยังเตะเฉพาะ `command: disconnect` / `reauth` ที่สั่งจากแผงควบคุม** (ฟีเจอร์แอดมินยังอยู่)
