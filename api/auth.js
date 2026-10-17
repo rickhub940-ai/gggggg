@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { verifyKey, createLink } = require('../lib/platoboost');
-const { issueTicket, verifyTicket, hashHwid } = require('../lib/ticket');
+const { issueTicket, verifyTicket, issueSessionToken, verifySessionToken, hashHwid } = require('../lib/ticket');
 const { issueRealtimeTicket } = require('../lib/realtime-ticket');
 const {
   createChallengeResponse,
@@ -417,7 +417,7 @@ module.exports = async function handler(req, res) {
   const ct = req.headers['content-type'] || '';
   if (!ct.includes('application/json')) return rejectOrTrap(req, res, 415);
 
-  const validActions = ['verify', 'script', 'script-verify', 'heartbeat', 'realtime-ticket', 'start', 'admin-ban'];
+  const validActions = ['verify', 'script', 'script-verify', 'heartbeat', 'realtime-ticket', 'session-renew', 'start', 'admin-ban'];
   if (!action || !validActions.includes(action)) return rejectOrTrap(req, res);
 
   res.setHeader('Cache-Control', 'no-store');
@@ -435,6 +435,7 @@ module.exports = async function handler(req, res) {
       case 'verify':         return await handleVerify(req, res, ip);
       case 'script':         return await handleScript(req, res, ip);
       case 'script-verify':  return await handleScriptVerify(req, res);
+      case 'session-renew':  return await handleSessionRenew(req, res, ip);
       case 'heartbeat':      return await handleHeartbeat(req, res, ip);
       case 'realtime-ticket': return await handleRealtimeTicket(req, res, ip);
       case 'start':          return await handleStart(req, res, ip);
@@ -800,7 +801,70 @@ async function handleScriptVerify(req, res) {
     session.verifiedAt = Date.now();
   }
 
-  return res.status(200).json({ valid: true, serverId: payload.jti, diagnostic: 'D2_OK' });
+  // Long-lived session token: the client trades it for fresh 30-minute tickets
+  // when it reconnects to the realtime gateway, so a steady connection can be
+  // kept for the whole play session without re-verifying the key every 30 min.
+  const sessionToken = issueSessionToken({
+    jti: payload.jti,
+    hwidHash: payload.hwidHash,
+    userId: payload.userId || null,
+    scriptName: payload.scriptName,
+  });
+
+  return res.status(200).json({
+    valid: true, serverId: payload.jti, diagnostic: 'D2_OK', sessionToken,
+  });
+}
+
+// ═══ /api/session-renew ═══
+// Exchange a valid session token + matching HWID for a fresh short ticket and a
+// fresh realtime token. Bans and revocations are still enforced on every call.
+async function handleSessionRenew(req, res, ip) {
+  const { sessionToken, hwid, scriptName } = req.body || {};
+
+  if (typeof sessionToken !== 'string' || sessionToken.length > 4096)
+    return res.status(400).json({ valid: false, error: 'sessionToken required' });
+  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
+    return res.status(400).json({ valid: false, error: 'invalid hwid format' });
+
+  const session = verifySessionToken(sessionToken);
+  if (!session) return res.status(401).json({ valid: false, error: 'session expired' });
+  if (session.hwidHash !== hashHwid(hwid))
+    return res.status(403).json({ valid: false, error: 'hwid mismatch' });
+  if (typeof scriptName === 'string' && scriptName !== session.scriptName)
+    return res.status(403).json({ valid: false, error: 'script mismatch' });
+
+  const reason = checkRevoked({ hwid, userId: session.userId, ip });
+  if (reason) return res.status(403).json({ valid: false, error: 'Banned: ' + reason });
+
+  const ticket = issueTicket({
+    hwidHash: session.hwidHash,
+    scope: 'script',
+    userId: session.userId || null,
+    scriptName: session.scriptName,
+  });
+  const claims = verifyTicket(ticket);
+  const realtime = issueRealtimeTicket({
+    jti: claims.jti,
+    hwidHash: session.hwidHash,
+    scriptName: session.scriptName,
+  });
+
+  return res.status(200).json({
+    valid: true,
+    ticket,
+    sessionToken: issueSessionToken({
+      jti: claims.jti,
+      hwidHash: session.hwidHash,
+      userId: session.userId || null,
+      scriptName: session.scriptName,
+    }),
+    realtime: {
+      url: process.env.REALTIME_WS_URL || '',
+      token: realtime,
+      expiresAt: claims.exp * 1000,
+    },
+  });
 }
 
 // ═══ /api/heartbeat ═══

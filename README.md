@@ -102,3 +102,14 @@ session (`sessionId`, `idleMs`) และสั่ง `notice` ถึง client 
 - handshake ไม่เสร็จใน 60 วิ → หยุดเงียบ ๆ ไม่เตะ
 - heartbeat ขาด 3 ครั้งติด → หยุด ไม่เตะ
 - **ยังเตะเฉพาะ `command: disconnect` / `reauth` ที่สั่งจากแผงควบคุม** (ฟีเจอร์แอดมินยังอยู่)
+
+## 2026-10-17 — Realtime ต่อตลอด + heartbeat ทุก 1 วิ
+
+- client (`scripts/main.lua`): heartbeat ทุก **1 วินาที**, reconnect อัตโนมัติแบบ backoff 1→10 วิ ไม่จำกัดจำนวนครั้ง
+- client รับ `notice` จากแผงควบคุมได้แล้ว (เดิมเงียบ) และเตะเฉพาะ `disconnect`/`reauth`
+- `/api/session-renew` (ใหม่): แลก `sessionToken` (24 ชม.) + hwid → ticket ใหม่ 30 นาที + realtime token ใหม่
+  → ต่อได้ตลอดทั้ง session โดยไม่ต้องตรวจคีย์ซ้ำ และยังบังคับ ban/revoke ทุกครั้ง
+- `/api/script-verify` ตอบ `sessionToken` กลับไปด้วย
+- gateway: `MAX_MESSAGES_PER_MINUTE` 60 → 360 (1 วิ/ครั้งไม่โดน rate limit), `heartbeatMs` ที่ประกาศ = 1000
+
+หมายเหตุ: heartbeat 1 วิทำให้ Render free tier ไม่ sleep ระหว่างใช้งาน (กินชั่วโมง free เร็วขึ้น)

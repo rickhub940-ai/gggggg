@@ -56,6 +56,7 @@ function route(req) {
     '/api/script-verify': ['script-verify'],
     '/api/heartbeat': ['heartbeat'],
     '/api/realtime-ticket': ['realtime-ticket'],
+    '/api/session-renew': ['session-renew'],
     '/api/realtime/sessions': ['realtime-sessions'],
     '/api/realtime/command': ['realtime-command'],
     '/admin': ['dashboard'],

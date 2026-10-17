@@ -149,6 +149,27 @@ async function main() {
     'main.lua must not kick when the realtime link drops');
   assert.match(mainLua, /continuing without it/);
 
+  // Realtime keep-alive contract: 1s heartbeat, session renewal endpoint exists.
+  assert.match(mainLua, /HEARTBEAT_EVERY = 1/, 'client heartbeats every second');
+  assert.match(mainLua, /session-renew/, 'client renews its ticket when it ages out');
+  assert.match(mainLua, /reconnecting/, 'client reconnects automatically');
+  assert.equal(/Realtime connection lost/.test(mainLua), false);
+
+  const renewMissing = await post('/api/session-renew', {});
+  assert.equal(renewMissing.status, 400);
+  const renewBad = await post('/api/session-renew', { sessionToken: 'x'.repeat(80), hwid: 'api-test-hwid' });
+  assert.equal(renewBad.status, 401);
+  const { issueSessionToken, hashHwid: hh } = require('../lib/ticket.js');
+  const validSession = issueSessionToken({ jti: 'f'.repeat(24), hwidHash: hh('api-test-hwid'), scriptName: 'main' });
+  const renewWrongHwid = await post('/api/session-renew', { sessionToken: validSession, hwid: 'someone-else' });
+  assert.equal(renewWrongHwid.status, 403);
+  const renewOk = await post('/api/session-renew', { sessionToken: validSession, hwid: 'api-test-hwid', scriptName: 'main' });
+  assert.equal(renewOk.status, 200);
+  const renewBody = await renewOk.json();
+  assert.equal(renewBody.valid, true);
+  assert.equal(typeof renewBody.ticket, 'string');
+  assert.equal(typeof renewBody.realtime.token, 'string');
+
   console.log('PASS API realtime ticket binding');
 }
 
