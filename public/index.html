@@ -528,12 +528,17 @@
         setDot(heroDot, 'ok');
       })
       .catch(function () {
+        var offlinePreview = !/^https?:$/.test(location.protocol) || !location.host;
         if (latencyEl) latencyEl.textContent = '—';
-        if (stateEl) stateEl.textContent = 'ติดต่อไม่ได้';
+        if (stateEl) stateEl.textContent = offlinePreview ? 'ตรวจสอบได้บนเว็บจริง' : 'ติดต่อไม่ได้';
         if (checkedEl) checkedEl.textContent = new Date().toLocaleTimeString('th-TH');
-        if (heroStatus) heroStatus.textContent = 'ตรวจสถานะไม่ได้ (อาจถูกบล็อกหรือออฟไลน์)';
-        setDot(dot, 'bad');
-        setDot(heroDot, 'bad');
+        if (heroStatus) {
+          heroStatus.textContent = offlinePreview
+            ? 'พรีวิวแบบไม่ต่อเน็ต — เปิดบนเว็บจริงเพื่อดูสถานะ'
+            : 'ตรวจสถานะไม่ได้ (อาจถูกบล็อกหรือออฟไลน์)';
+        }
+        setDot(dot, offlinePreview ? '' : 'bad');
+        setDot(heroDot, offlinePreview ? '' : 'bad');
       })
       .then(function () { if (timer) clearTimeout(timer); });
   }
