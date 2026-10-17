@@ -92,6 +92,17 @@ function hasRobloxHeader(req) {
   return false;
 }
 
+// The base URL written into generated Lua is always the host the executor
+// actually reached, so a preview deployment or a renamed project can never
+// point stage 1 at a deployment that no longer exists.
+function requestOrigin(req) {
+  const host = String(
+    req.headers['x-forwarded-host'] || req.headers.host || 'loader999mss.vercel.app',
+  ).split(',')[0].trim();
+  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+  return `${proto}://${host}`;
+}
+
 function timingSafeStringEquals(supplied, expectedValue) {
   if (typeof supplied !== 'string' || typeof expectedValue !== 'string') return false;
   const expected = Buffer.from(expectedValue, 'utf8');
@@ -195,7 +206,23 @@ module.exports = async function handler(req, res) {
     if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
     if (isBrowserRequest(req)) return trapRedirect(res);
     const name = req.query?.name || url.searchParams.get('name');
-    return await serveArtifact(req, res, name, url);
+    return await serveArtifact(req, res, name, url, requestOrigin(req));
+  }
+
+  // Public, credential-free health probe so the landing page can show a real
+  // status instead of a static badge. Deliberately returns no configuration.
+  if (action === 'health') {
+    if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.status(200).json({
+      ok: true,
+      service: '999MS',
+      version: '2.1.0',
+      chain: '999MS-chain-v1',
+      realtime: Boolean(process.env.REALTIME_WS_URL),
+      ts: Date.now(),
+    });
   }
 
   if (action === 'trap') return rejectOrTrap(req, res);
@@ -249,9 +276,9 @@ function readArtifact(name) {
   return body;
 }
 
-async function serveArtifact(req, res, name, url) {
+async function serveArtifact(req, res, name, url, origin) {
   if (name === 'loadc') {
-    const body = await renderLoadcArtifact();
+    const body = await renderLoadcArtifact(origin);
     if (!body) return res.status(503).send('');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
@@ -290,7 +317,7 @@ const LOADC_PRELUDE_LINES = Object.freeze([
   'local $a=os.clock()',
   'local $b=os.time()',
   'local $c=os.date"*t"',
-  'local $f="https://loader999ms.vercel.app"',
+  'local $f="@BASE_URL@"',
   'local $h="$v"',
   'local $i="$w"',
   'local $j="$x"',
@@ -367,7 +394,7 @@ async function obfuscateWithWeAreDevs(source) {
   }
 }
 
-async function renderLoadcArtifact() {
+async function renderLoadcArtifact(origin = 'https://loader999mss.vercel.app') {
   const capability = createLoadaPathCapability();
   if (!capability) return null;
   const stagedSource = readArtifact('loada');
@@ -393,7 +420,8 @@ async function renderLoadcArtifact() {
   let source = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
     .replace('$y', prelude.join(';'))
     .replace('$z', setup.join(';'))
-    .replaceAll('@STAGE2_SHA256@', stagedSha256);
+    .replaceAll('@STAGE2_SHA256@', stagedSha256)
+    .replaceAll('@BASE_URL@', origin);
   for (const [token, value] of substitutions) source = source.replaceAll(token, value);
   return obfuscateWithWeAreDevs(source);
 }
@@ -447,7 +475,7 @@ async function handleVerify(req, res, ip) {
 // ═══ /api/script ═══
 async function handleScript(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
-  const { ticket, Data, scriptName } = req.body || {};
+  const { ticket, Data, scriptName, hwid } = req.body || {};
 
   if (typeof ticket !== 'string' || ticket.length > 4096)
     return res.status(400).json({ Valid: false, reason: 'ticket required' });
@@ -471,6 +499,18 @@ async function handleScript(req, res, ip) {
 
   if (!isValidScriptName(name))
     return res.status(200).json(encodeProtectedPayload({ Valid: false, reason: 'Invalid script name' }, xorKey));
+
+  // Ticket replay guard. A ticket is bound to one HWID at /api/verify, so the
+  // body fetch must be redeemable only from that same device. Set
+  // ENFORCE_SCRIPT_HWID=1 once the deployed client sends `hwid` here.
+  if (process.env.ENFORCE_SCRIPT_HWID === '1') {
+    if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512) {
+      return res.status(400).json({ Valid: false, reason: 'hwid required' });
+    }
+    if (!timingSafeStringEquals(hashHwid(hwid), payload.hwidHash)) {
+      return res.status(403).json({ Valid: false, reason: 'hwid mismatch' });
+    }
+  }
 
   let clientData = null;
   if (Data) {
@@ -521,7 +561,8 @@ async function handleScript(req, res, ip) {
     .replace(/\$\{SERVERID\}/g, payload.jti)
     .replace(/\$\{SCRIPTID\}/g, name)
     .replace(/\$\{HWIDHASH\}/g, payload.hwidHash)
-    .replace(/\$\{ISSUED\}/g, new Date().toISOString());
+    .replace(/\$\{ISSUED\}/g, new Date().toISOString())
+    .replace(/\$\{BASEURL\}/g, requestOrigin(req));
 
   const check = createChallengeResponse(rngChallenge.values);
 
@@ -666,9 +707,6 @@ async function handleStart(req, res, ip) {
 
   if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
     return res.status(400).json({ error: 'invalid hwid' });
-
-  if (!checkRateLimit(ip))
-    return res.status(429).json({ error: 'Rate limited' });
 
   const reason = checkRevoked({ hwid, ip });
   if (reason)

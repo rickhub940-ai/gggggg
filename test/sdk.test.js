@@ -85,7 +85,7 @@ assert.ok(loadcSource.includes('xpcall(function()return game:HttpGet($m)end,$2)'
 assert.ok(loadcSource.includes('return $u($g,...)'));
 assert.doesNotMatch(loadcSource, /api\/bootstrap|syn\.request|http_request/);
 assert.doesNotMatch(loadcSource, /\bKick\(|CoreGui|replicatesignal|LocalPlayer:Kick/);
-assert.match(authSource, /function renderLoadcArtifact\(\)/);
+assert.match(authSource, /function renderLoadcArtifact\(origin/);
 assert.match(authSource, /const LOADC_PRELUDE_LINES/);
 assert.match(authSource, /const LOADC_SETUP_BLOCKS/);
 assert.match(authSource, /function shuffled\(items\)/);
@@ -265,7 +265,7 @@ function parseRenderedLoadc(source) {
     ['clock', source.indexOf('=os.clock()')],
     ['time', source.indexOf('=os.time()')],
     ['date', source.indexOf('os.date"*t"')],
-    ['base', source.indexOf('="https://loader999ms.vercel.app"')],
+    ['base', source.indexOf('="https://loader999mss.vercel.app"')],
     ['timeStamp', source.indexOf('=os.difftime(')],
     ['stageArgs', source.indexOf(',"/loada.lua","999MS-chain-v1","lite",true}')],
     ['chainState', source.indexOf('MS999Chain={Version="999MS-chain-v1"')],
@@ -311,7 +311,18 @@ function parseRenderedLoadc(source) {
   assert.equal(mismatchedRuntime.statusCode, 403);
   assert.equal(mismatchedRuntime.body.diagnostic, 'D2_SECRET_MISMATCH');
 
-  const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
+  const healthProbe = await requestEndpoint('/api/auth?action=health');
+assert.equal(healthProbe.statusCode, 200);
+assert.equal(healthProbe.body.ok, true);
+assert.equal(healthProbe.body.chain, '999MS-chain-v1');
+assert.equal(JSON.stringify(healthProbe.body).includes('SECRET'), false);
+
+const templatedHost = await requestEndpoint('/api/auth?action=artifact&name=loadc', {
+  'x-forwarded-host': 'preview.example.test', 'x-forwarded-proto': 'https',
+});
+assert.ok(unwrapWeAreDevsLoadc(templatedHost.body).includes('="https://preview.example.test"'));
+
+const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
   const secondExecutorArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc');
   const browserArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', { 'user-agent': 'Mozilla/5.0' });
   const robloxArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', {
@@ -322,7 +333,7 @@ function parseRenderedLoadc(source) {
   assert.equal(robloxArtifact.statusCode, 200);
   assert.equal(executorArtifact.body.startsWith('--[['), false, 'WeAreDevs banner comment must be removed');
   assert.doesNotMatch(executorArtifact.body, /--\[\[\s*v[\d.]+\s+https?:\/\/wearedevs\.net\/obfuscator/i);
-  assert.equal(obfuscationInputs.length, 3, 'each permitted loadc request must be obfuscated');
+  assert.equal(obfuscationInputs.length, 4, 'each permitted loadc request must be obfuscated');
   assert.ok(obfuscationInputs.every((source) => !source.startsWith('--')), 'source submitted to WeAreDevs must be comment-free');
   const firstLoadc = parseRenderedLoadc(unwrapWeAreDevsLoadc(executorArtifact.body));
   const secondLoadc = parseRenderedLoadc(unwrapWeAreDevsLoadc(secondExecutorArtifact.body));
