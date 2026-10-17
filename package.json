@@ -1,12 +1,11 @@
 {
-  "name": "ms999",
-  "version": "2.0.0",
+  "name": "loader999mss-api",
+  "version": "1.0.0",
   "private": true,
-  "exports": {
-    "./server-sdk": "./lib/999MS-server-sdk.js"
-  },
+  "type": "commonjs",
   "scripts": {
-    "test:sdk": "node test/sdk.test.js"
+    "start": "node server.js",
+    "test": "node test/api.test.js"
   },
-  "engines": { "node": ">=18" }
+  "engines": { "node": ">=20" }
 }

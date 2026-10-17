@@ -4,6 +4,7 @@ const path = require('node:path');
 
 const { verifyKey, createLink } = require('../lib/platoboost');
 const { issueTicket, verifyTicket, hashHwid } = require('../lib/ticket');
+const { issueRealtimeTicket } = require('../lib/realtime-ticket');
 const {
   createChallengeResponse,
   validateClientChallenge,
@@ -33,6 +34,7 @@ const STAGE_TWO_RAW_SHA256 = '2c6a584d79164980356212f691af1e01f0a5df0164e2f445c9
 // function. The signed capability is the cross-instance authority; the map
 // closes accidental/replayed fetches that return to the same instance.
 const redeemedStageCapabilities = new Map();
+
 
 // ═══ Rate limit ═══
 const rateLimit = new Map();
@@ -90,36 +92,74 @@ function hasRobloxHeader(req) {
   return false;
 }
 
-// The base URL written into generated Lua is always the host the executor
-// actually reached, so a preview deployment or a renamed project can never
-// point stage 1 at a deployment that no longer exists.
+// Prefer the host the executor actually reached so a preview deployment or a
+// renamed project can never point the chain at a host that does not exist.
+// PUBLIC_BASE_URL stays as the fallback for local runs.
 function requestOrigin(req) {
   const host = String(
-    req.headers['x-forwarded-host'] || req.headers.host || 'loader999mss.vercel.app',
+    (req && req.headers && (req.headers['x-forwarded-host'] || req.headers.host)) || '',
   ).split(',')[0].trim();
-  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
-  return `${proto}://${host}`;
+  if (!host || !/^[a-zA-Z0-9.:-]+$/.test(host)) return publicBaseUrl();
+  const proto = String((req.headers['x-forwarded-proto'] || 'https')).split(',')[0].trim();
+  return `${proto === 'http' ? 'http' : 'https'}://${host}`;
 }
 
-// ═══ Control panel plumbing ═══
-// The panel authenticates with ADMIN_TOKEN, which never reaches the browser in
-// any other form. Calls to the Render gateway use SOCKET_ADMIN_TOKEN when it is
-// configured, otherwise the token derived from REALTIME_TICKET_SECRET that the
-// gateway also accepts — so no second secret has to be copied between hosts.
-const REALTIME_HTTP_FALLBACK = 'https://loader999mss-realtime.onrender.com';
-
-function realtimeHttpBase() {
+function publicBaseUrl() {
+  const value = process.env.PUBLIC_BASE_URL;
+  if (typeof value !== 'string' || value.length > 2048) return null;
   try {
-    const url = new URL(process.env.REALTIME_WS_URL || '');
-    return `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}`;
+    const parsed = new URL(value);
+    if ((parsed.protocol !== 'https:' && parsed.protocol !== 'http:') || parsed.username || parsed.password || parsed.search || parsed.hash) return null;
+    return parsed.origin;
   } catch {
-    return REALTIME_HTTP_FALLBACK;
+    return null;
   }
 }
 
-function socketAdminToken() {
-  const explicit = process.env.SOCKET_ADMIN_TOKEN;
-  if (typeof explicit === 'string' && explicit.length >= 32) return explicit;
+function realtimeWsUrl() {
+  const value = process.env.REALTIME_WS_URL;
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'wss:' || parsed.username || parsed.password || parsed.search || parsed.hash) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function timingSafeStringEquals(supplied, expectedValue) {
+  if (typeof supplied !== 'string' || typeof expectedValue !== 'string') return false;
+  const expected = Buffer.from(expectedValue, 'utf8');
+  const candidate = Buffer.from(supplied, 'utf8');
+  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+}
+
+function realtimeAdminBaseUrl() {
+  const value = process.env.REALTIME_ADMIN_URL || process.env.REALTIME_WS_URL;
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
+    if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
+    if ((parsed.protocol !== 'https:' && parsed.protocol !== 'http:') || parsed.username || parsed.password) return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function hasAdminAccess(req) {
+  const expected = process.env.ADMIN_TOKEN;
+  return typeof expected === 'string' && expected.length >= 32
+    && timingSafeStringEquals(req.headers['x-admin-token'], expected);
+}
+
+function realtimeAdminToken() {
+  const value = process.env.REALTIME_ADMIN_TOKEN;
+  if (typeof value === 'string' && value.length >= 32) return value;
+  // Fall back to a token derived from the shared realtime secret so the gateway
+  // needs no second copied credential. The gateway accepts the same derivation.
   const secret = process.env.REALTIME_TICKET_SECRET;
   if (typeof secret === 'string' && secret.length >= 32) {
     return crypto.createHmac('sha256', secret).update('999MS socket admin v1').digest('hex');
@@ -127,60 +167,22 @@ function socketAdminToken() {
   return null;
 }
 
-function adminTokenFromRequest(req) {
-  const direct = req.headers['x-admin-token'];
-  if (typeof direct === 'string' && direct.length > 0) return direct;
-  const bearer = req.headers.authorization;
-  if (typeof bearer === 'string' && bearer.startsWith('Bearer ')) return bearer.slice(7);
-  return '';
-}
-
-function isAdminRequest(req) {
-  const expected = process.env.ADMIN_TOKEN;
-  return typeof expected === 'string' && expected.length >= 16
-    && timingSafeStringEquals(adminTokenFromRequest(req), expected);
-}
-
-async function gatewayRequest(pathname, options = {}) {
-  const token = socketAdminToken();
-  if (!token) return { ok: false, status: 503, data: { ok: false, reason: 'gateway_not_configured' } };
-  const controller = new AbortController();
-  // Render's free instance can take ~15 s to wake from idle.
-  const timeout = setTimeout(() => controller.abort(), 24000);
-  try {
-    const response = await fetch(`${realtimeHttpBase()}${pathname}`, {
-      ...options,
-      headers: { ...(options.headers || {}), authorization: `Bearer ${token}` },
-      signal: controller.signal,
-    });
-    let data = {};
-    try { data = await response.json(); } catch { data = {}; }
-    return { ok: response.ok, status: response.status, data };
-  } catch (error) {
-    const aborted = error.name === 'AbortError';
-    return {
-      ok: false,
-      status: aborted ? 504 : 502,
-      data: { ok: false, reason: aborted ? 'gateway_timeout' : 'gateway_unreachable' },
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-const CONTROL_ACTIONS = new Set(['control-sessions', 'control-command', 'control-bans', 'control-traffic']);
-
-// Ring buffer of the last 200 requests so the panel can see what a real
-// executor actually fetched and which status it received. No keys, HWIDs,
-// tickets or bodies are stored: only method/path/host/UA/status/timing.
-const trafficLog = [];
-const TRAFFIC_MAX = 200;
-
-function timingSafeStringEquals(supplied, expectedValue) {
-  if (typeof supplied !== 'string' || typeof expectedValue !== 'string') return false;
-  const expected = Buffer.from(expectedValue, 'utf8');
-  const candidate = Buffer.from(supplied, 'utf8');
-  return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
+async function realtimeAdminRequest(route, options = {}) {
+  const base = realtimeAdminBaseUrl();
+  const token = realtimeAdminToken();
+  if (!base || !token) return null;
+  const response = await fetch(`${base}${route}`, {
+    method: options.method || 'GET',
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(options.body ? { 'content-type': 'application/json' } : {}),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(8_000),
+  });
+  let payload = null;
+  try { payload = await response.json(); } catch {}
+  return { response, payload };
 }
 
 // LOADA_PATH_SECRET is optional when the already-required TICKET_SECRET is
@@ -237,10 +239,8 @@ function consumeStageCapability(capability) {
 }
 
 // Browser trapping is cosmetic anti-scraping, never authorization. Mobile
-// executors (Delta, Fluxus, …) send a Chrome-like User-Agent and language/`sec-*`
-// headers, which used to make the loader's own `/loader.lua` fetch receive a
-// 302 and die with "Loader fetch failed" (reference MS9-0530EB6F). Artifact and
-// API traffic is therefore served regardless of UA by default; set
+// executors (Delta, Fluxus, …) look like Chrome, so trapping artifacts on UA
+// used to break the loader's own /loader.lua fetch. Opt in with
 // TRAP_BROWSER_ARTIFACTS=1 to restore the old behaviour.
 function trapBrowserArtifacts() {
   return process.env.TRAP_BROWSER_ARTIFACTS === '1';
@@ -264,11 +264,16 @@ function isBrowserRequest(req) {
 }
 
 // ═══ Main handler ═══
+const CONTROL_ACTIONS = new Set(['control-sessions', 'control-command', 'control-bans', 'control-traffic']);
+// Ring buffer of the last 200 requests (no bodies, keys, HWIDs or tickets) so
+// the panel can show what an executor actually fetched and which status it got.
+const trafficLog = [];
+const TRAFFIC_MAX = 200;
+
 module.exports = async function handler(req, res) {
   const url = new URL(req.url, 'http://x');
   const action = req.query?.action || url.searchParams.get('action');
 
-  // ── request trace (see /api/control/traffic) ──
   const trace = {
     ts: Date.now(),
     method: req.method,
@@ -290,81 +295,6 @@ module.exports = async function handler(req, res) {
       const raw = res[methodName].bind(res);
       res[methodName] = (...args) => { finish(200); return raw(...args); };
     }
-  }
-
-  // Legacy chain id endpoint. The Oct-14 generation of loadc.lua asked here for
-  // a 64-hex chain id before fetching Stage 2; a cached copy of that bootstrapper
-  // still runs on some executors. It returns no secrets and no session state.
-  if (action === 'bootstrap') {
-    if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return res.status(200).json({
-      ok: true,
-      id: crypto.randomBytes(32).toString('hex'),
-      chain: '999MS-chain-v1',
-      ts: Date.now(),
-    });
-  }
-
-  // ═══ Control panel (browser-facing, ADMIN_TOKEN gated) ═══
-  if (CONTROL_ACTIONS.has(action)) {
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    if (req.method !== 'POST') return res.status(405).json({ ok: false, reason: 'method' });
-    if (!isAdminRequest(req)) return res.status(401).json({ ok: false, reason: 'unauthorized' });
-
-    if (action === 'control-traffic') {
-      const limit = Math.min(Number(req.body && req.body.limit) || 100, TRAFFIC_MAX);
-      return res.status(200).json({ ok: true, count: trafficLog.length, traffic: trafficLog.slice(-limit).reverse() });
-    }
-
-    if (action === 'control-sessions') {
-      const gateway = await gatewayRequest('/admin/sessions');
-      const health = await gatewayRequest('/admin/stats');
-      return res.status(gateway.ok ? 200 : gateway.status).json({
-        ok: gateway.ok,
-        gateway: {
-          reachable: gateway.status !== 502 && gateway.status !== 504,
-          version: gateway.data?.version || health.data?.version || null,
-          uptime: health.data?.uptime ?? null,
-          reason: gateway.data?.reason || null,
-        },
-        count: gateway.data?.count || 0,
-        sessions: Array.isArray(gateway.data?.sessions) ? gateway.data.sessions : [],
-        now: Date.now(),
-      });
-    }
-
-    if (action === 'control-command') {
-      const body = req.body || {};
-      const jti = typeof body.jti === 'string' ? body.jti : '';
-      const commandName = typeof body.command === 'string' ? body.command : '';
-      if (!/^[a-f0-9]{24}$/.test(jti)) return res.status(400).json({ ok: false, reason: 'invalid jti' });
-      if (!['notice', 'reauth', 'disconnect'].includes(commandName)) {
-        return res.status(400).json({ ok: false, reason: 'invalid command' });
-      }
-      const gateway = await gatewayRequest('/admin/command', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          jti,
-          command: commandName,
-          message: typeof body.message === 'string' ? body.message.slice(0, 256) : '',
-          reason: typeof body.reason === 'string' ? body.reason.slice(0, 128) : '',
-        }),
-      });
-      return res.status(gateway.ok ? 200 : gateway.status).json(gateway.data);
-    }
-
-    // control-bans
-    return res.status(200).json({
-      ok: true,
-      stats: stats(),
-      lists: listRevocations(),
-      scope: 'instance',
-      note: 'In-memory revocations apply to this function instance; env REVOKED_* entries apply everywhere.',
-    });
   }
 
   // Payload remains the static final handoff from the legacy stage chain.
@@ -393,20 +323,87 @@ module.exports = async function handler(req, res) {
     return await serveArtifact(req, res, name, url, requestOrigin(req));
   }
 
-  // Public, credential-free health probe so the landing page can show a real
-  // status instead of a static badge. Deliberately returns no configuration.
+  // Public, credential-free health probe for the landing page.
   if (action === 'health') {
-    if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
+    if (req.method !== 'GET') return res.status(405).json({ ok: false });
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.status(200).json({
       ok: true,
       service: '999MS',
-      version: '2.1.0',
+      version: '3.0.0',
       chain: '999MS-chain-v1',
       realtime: Boolean(process.env.REALTIME_WS_URL),
       ts: Date.now(),
     });
+  }
+
+  // ═══ Control panel (browser-facing, ADMIN_TOKEN gated) ═══
+  if (CONTROL_ACTIONS.has(action)) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    if (req.method !== 'POST') return res.status(405).json({ ok: false, reason: 'method' });
+    if (!hasAdminAccess(req)) return res.status(401).json({ ok: false, reason: 'unauthorized' });
+
+    if (action === 'control-traffic') {
+      const limit = Math.min(Number(req.body && req.body.limit) || 100, TRAFFIC_MAX);
+      return res.status(200).json({ ok: true, count: trafficLog.length, traffic: trafficLog.slice(-limit).reverse() });
+    }
+
+    if (action === 'control-sessions') {
+      const result = await realtimeAdminRequest('/admin/sessions');
+      const reachable = Boolean(result && result.response && result.response.ok);
+      const sessions = reachable
+        ? (result.payload?.sessions || []).map((entry) => safeRealtimeSession(entry)).filter(Boolean)
+        : [];
+      return res.status(200).json({
+        ok: reachable,
+        gateway: { reachable, reason: reachable ? null : 'gateway_unreachable', version: null },
+        count: sessions.length,
+        sessions,
+        now: Date.now(),
+      });
+    }
+
+    if (action === 'control-command') {
+      const body = req.body || {};
+      const jti = typeof body.jti === 'string' ? body.jti : (typeof body.sessionId === 'string' ? body.sessionId : '');
+      const commandName = typeof body.command === 'string' ? body.command : '';
+      if (!/^[a-f0-9]{24}$/.test(jti)) return res.status(400).json({ ok: false, reason: 'invalid jti' });
+      if (!['notice', 'reauth', 'disconnect'].includes(commandName)) {
+        return res.status(400).json({ ok: false, reason: 'invalid command' });
+      }
+      const payload = { jti, command: commandName };
+      if (commandName === 'disconnect') payload.reason = String(body.reason || 'admin disconnect').slice(0, 128);
+      else payload.message = String(body.message || '').slice(0, 256);
+      const result = await realtimeAdminRequest('/admin/command', { method: 'POST', body: payload });
+      const ok = Boolean(result && result.response && result.response.ok && result.payload?.ok === true);
+      return res.status(ok ? 200 : 502).json({ ok });
+    }
+
+    // control-bans
+    return res.status(200).json({
+      ok: true,
+      stats: stats(),
+      lists: listRevocations(),
+      scope: 'instance',
+      note: 'In-memory revocations apply to this function instance; env REVOKED_* entries apply everywhere.',
+    });
+  }
+
+  if (action === 'dashboard') {
+    if (req.method !== 'GET') return res.status(405).send('');
+    return serveAdminDashboard(res);
+  }
+
+  if (action === 'realtime-sessions') {
+    if (req.method !== 'GET') return res.status(405).json({ error: 'method not allowed' });
+    return await handleRealtimeSessions(req, res);
+  }
+
+  if (action === 'realtime-command') {
+    if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
+    return await handleRealtimeCommand(req, res);
   }
 
   if (action === 'trap') return rejectOrTrap(req, res);
@@ -420,7 +417,7 @@ module.exports = async function handler(req, res) {
   const ct = req.headers['content-type'] || '';
   if (!ct.includes('application/json')) return rejectOrTrap(req, res, 415);
 
-  const validActions = ['verify', 'script', 'script-verify', 'heartbeat', 'start', 'admin-ban'];
+  const validActions = ['verify', 'script', 'script-verify', 'heartbeat', 'realtime-ticket', 'start', 'admin-ban'];
   if (!action || !validActions.includes(action)) return rejectOrTrap(req, res);
 
   res.setHeader('Cache-Control', 'no-store');
@@ -439,6 +436,7 @@ module.exports = async function handler(req, res) {
       case 'script':         return await handleScript(req, res, ip);
       case 'script-verify':  return await handleScriptVerify(req, res);
       case 'heartbeat':      return await handleHeartbeat(req, res, ip);
+      case 'realtime-ticket': return await handleRealtimeTicket(req, res, ip);
       case 'start':          return await handleStart(req, res, ip);
       case 'admin-ban':      return await handleAdminBan(req, res);
       default:
@@ -450,6 +448,77 @@ module.exports = async function handler(req, res) {
   }
 };
 
+function serveAdminDashboard(res) {
+  try {
+    const body = fs.readFileSync(path.join(process.cwd(), 'admin', 'dashboard.html'), 'utf8');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    return res.status(200).send(body);
+  } catch {
+    return res.status(503).send('');
+  }
+}
+
+function safeRealtimeSession(value, now = Date.now()) {
+  if (!value || typeof value !== 'object') return null;
+  // Older gateway builds reported `jti`; newer ones report `sessionId`. Accept
+  // both so a rollout on either side cannot empty the panel.
+  const sessionId = /^[a-f0-9]{24}$/.test(value.sessionId || '') ? value.sessionId
+    : (/^[a-f0-9]{24}$/.test(value.jti || '') ? value.jti : '');
+  if (!sessionId) return null;
+  if (!/^[a-f0-9]{64}$/.test(value.hwidHash || '') || !isValidScriptName(value.scriptName)) return null;
+  if (!Number.isFinite(value.connectedAt) || !Number.isFinite(value.lastActivityAt)) return null;
+  const idleMs = Number.isFinite(value.idleMs)
+    ? value.idleMs
+    : Math.max(0, now - value.lastActivityAt);
+  return {
+    sessionId,
+    hwidHash: value.hwidHash,
+    scriptName: value.scriptName,
+    connectedAt: value.connectedAt,
+    lastActivityAt: value.lastActivityAt,
+    idleMs: Math.max(0, Math.floor(idleMs)),
+  };
+}
+
+async function handleRealtimeSessions(req, res) {
+  if (!hasAdminAccess(req)) return res.status(401).json({ error: 'unauthorized' });
+  try {
+    const result = await realtimeAdminRequest('/admin/sessions');
+    if (!result || !result.response.ok || result.payload?.ok !== true || !Array.isArray(result.payload.sessions)) {
+      return res.status(502).json({ error: 'realtime unavailable' });
+    }
+    const sessions = result.payload.sessions.map((entry) => safeRealtimeSession(entry)).filter(Boolean).slice(0, 500);
+    return res.status(200).json({ ok: true, now: Date.now(), sessions });
+  } catch {
+    return res.status(502).json({ error: 'realtime unavailable' });
+  }
+}
+
+async function handleRealtimeCommand(req, res) {
+  if (!hasAdminAccess(req)) return res.status(401).json({ error: 'unauthorized' });
+  const { sessionId, command, message } = req.body || {};
+  if (typeof sessionId !== 'string' || !/^[a-f0-9]{24}$/.test(sessionId)
+    || !['disconnect', 'reauth', 'notice'].includes(command)
+    || (message !== undefined && (typeof message !== 'string' || message.length > 128))) {
+    return res.status(400).json({ error: 'invalid command' });
+  }
+  const body = { jti: sessionId, command };
+  if (command === 'disconnect') body.reason = message || 'session ended';
+  else if (message) body.message = message;
+  try {
+    const result = await realtimeAdminRequest('/admin/command', { method: 'POST', body });
+    if (!result || !result.response.ok || result.payload?.ok !== true) {
+      return res.status(502).json({ error: 'realtime unavailable' });
+    }
+    return res.status(200).json({ ok: true });
+  } catch {
+    return res.status(502).json({ error: 'realtime unavailable' });
+  }
+}
+
 function readArtifact(name) {
   const filename = ARTIFACT_FILES[name];
   if (!filename) return null;
@@ -460,9 +529,19 @@ function readArtifact(name) {
   return body;
 }
 
+// Roblox exposes a non-string `script` object in many executor environments.
+// The legacy Stage-3 loader treated that object as a user script selection and
+// kicked before its normal flow. Normalize only missing/invalid values; a
+// valid caller-provided script name remains untouched.
+const LOADER_SCRIPT_NORMALIZER = 'local e=getgenv();local s=e.script;if type(s)~="string"or#s<1 or#s>64 or not s:match("^[%w_%-]+$")then e.script="main"end;';
+
+function renderLoaderArtifact() {
+  return `${LOADER_SCRIPT_NORMALIZER}${readArtifact('loader')}`;
+}
+
 async function serveArtifact(req, res, name, url, origin) {
   if (name === 'loadc') {
-    const body = await renderLoadcArtifact(origin);
+    const body = renderLoadcArtifact(origin);
     if (!body) return res.status(503).send('');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
@@ -475,15 +554,10 @@ async function serveArtifact(req, res, name, url, origin) {
     return rejectOrTrap(req, res);
   }
   try {
-    let body = readArtifact(name);
+    let body = name === 'loader' ? renderLoaderArtifact() : readArtifact(name);
     if (typeof body !== 'string') return res.status(503).send('');
-    // Stage 2 is integrity-pinned on the raw bytes above, so its placeholder is
-    // replaced only after that check. Stages 3/4 are templated the same way.
-    // This keeps a renamed project or preview deployment from pointing the
-    // chain at a host that no longer exists.
-    if (name === 'loada') {
-      body = body.replaceAll('@BASE_URL@', origin || '');
-    } else if (body.includes('@BASE_URL@')) body = body.replaceAll('@BASE_URL@', origin || '');
+    // Readable stages carry @BASE_URL@ so the host is never hard-coded.
+    if (body.includes('@BASE_URL@')) body = body.replaceAll('@BASE_URL@', origin || '');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).send(body);
@@ -495,23 +569,25 @@ async function serveArtifact(req, res, name, url, origin) {
 
 // ═══ Dynamic Stage-1 renderer ═══
 // /loadc.lua is rendered from the readable template in artifacts/loadc.lua.
-// No obfuscator is involved: the source is plain Lua that a user can audit.
-function renderLoadcArtifact(origin = 'https://loader999mss.vercel.app') {
+// No obfuscator is involved: the source served to the executor stays plain Lua
+// that anyone can audit line by line.
+function renderLoadcArtifact(origin) {
+  const baseUrl = origin || publicBaseUrl();
+  if (!baseUrl) return null;
   const capability = createLoadaPathCapability();
   if (!capability) return null;
-  const stagedRaw = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loada.lua'), 'utf8');
+  const stagedRaw = readArtifact('loada');
   if (!stagedRaw) return null;
-  const chainId = crypto.randomBytes(32).toString('hex');
-  // Stage 1 hashes exactly the bytes Stage 2 will receive, with the placeholder
-  // already resolved for this request's host.
-  const stagedSource = stagedRaw.replaceAll('@BASE_URL@', origin);
+  // Stage 1 pins exactly the bytes Stage 2 will receive, with the host already
+  // resolved for this request.
+  const stagedSource = stagedRaw.replaceAll('@BASE_URL@', baseUrl);
   const stagedSha256 = crypto.createHash('sha256').update(stagedSource).digest('hex');
   return fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8')
-    .replaceAll('__CHAIN_ID__', chainId)
+    .replaceAll('__CHAIN_ID__', crypto.randomBytes(32).toString('hex'))
     .replaceAll('__CAP_D__', capability.d)
     .replaceAll('__CAP_N__', capability.n)
     .replaceAll('__STAGE2_SHA256__', stagedSha256)
-    .replaceAll('__BASE_URL__', origin);
+    .replaceAll('__BASE_URL__', baseUrl);
 }
 
 // ═══ /api/verify ═══
@@ -563,7 +639,7 @@ async function handleVerify(req, res, ip) {
 // ═══ /api/script ═══
 async function handleScript(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
-  const { ticket, Data, scriptName, hwid } = req.body || {};
+  const { ticket, Data, scriptName } = req.body || {};
 
   if (typeof ticket !== 'string' || ticket.length > 4096)
     return res.status(400).json({ Valid: false, reason: 'ticket required' });
@@ -587,18 +663,6 @@ async function handleScript(req, res, ip) {
 
   if (!isValidScriptName(name))
     return res.status(200).json(encodeProtectedPayload({ Valid: false, reason: 'Invalid script name' }, xorKey));
-
-  // Ticket replay guard. A ticket is bound to one HWID at /api/verify, so the
-  // body fetch must be redeemable only from that same device. Set
-  // ENFORCE_SCRIPT_HWID=1 once the deployed client sends `hwid` here.
-  if (process.env.ENFORCE_SCRIPT_HWID === '1') {
-    if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512) {
-      return res.status(400).json({ Valid: false, reason: 'hwid required' });
-    }
-    if (!timingSafeStringEquals(hashHwid(hwid), payload.hwidHash)) {
-      return res.status(403).json({ Valid: false, reason: 'hwid mismatch' });
-    }
-  }
 
   let clientData = null;
   if (Data) {
@@ -649,8 +713,7 @@ async function handleScript(req, res, ip) {
     .replace(/\$\{SERVERID\}/g, payload.jti)
     .replace(/\$\{SCRIPTID\}/g, name)
     .replace(/\$\{HWIDHASH\}/g, payload.hwidHash)
-    .replace(/\$\{ISSUED\}/g, new Date().toISOString())
-    .replace(/\$\{BASEURL\}/g, requestOrigin(req));
+    .replace(/\$\{ISSUED\}/g, new Date().toISOString());
 
   const check = createChallengeResponse(rngChallenge.values);
 
@@ -789,12 +852,50 @@ async function handleHeartbeat(req, res, ip) {
   }, xorKey));
 }
 
+function verifiedScriptContext(ticket, hwid, scriptName, ip) {
+  if (typeof ticket !== 'string' || ticket.length > 4096) return { error: 'ticket required', status: 400 };
+  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512) return { error: 'invalid hwid format', status: 400 };
+  const payload = verifyTicket(ticket);
+  if (!payload || payload.scope !== 'script') return { error: 'invalid ticket', status: 401 };
+  if (!timingSafeStringEquals(payload.hwidHash, hashHwid(hwid))) return { error: 'hwid mismatch', status: 403 };
+  const name = typeof scriptName === 'string' && scriptName.length ? scriptName : payload.scriptName;
+  if (!isValidScriptName(name) || name !== payload.scriptName) return { error: 'scriptName mismatch', status: 403 };
+  const reason = checkRevoked({ hwid, userId: payload.userId, ip });
+  if (reason) return { error: 'Banned: ' + reason, status: 403 };
+  return { payload, name, hwidHash: hashHwid(hwid) };
+}
+
+async function handleRealtimeTicket(req, res, ip) {
+  const { ticket, hwid, scriptName } = req.body || {};
+  const context = verifiedScriptContext(ticket, hwid, scriptName, ip);
+  if (context.error) return res.status(context.status).json({ valid: false, error: context.error });
+  const payload = context.payload;
+  const name = context.name;
+
+  const url = realtimeWsUrl();
+  if (!url) return res.status(503).json({ valid: false, error: 'realtime unavailable' });
+  try {
+    const realtimeTicket = issueRealtimeTicket({
+      jti: payload.jti,
+      hwidHash: payload.hwidHash,
+      scriptName: name,
+    });
+    return res.status(200).json({ valid: true, url, token: realtimeTicket, expiresAt: payload.exp * 1000 });
+  } catch (error) {
+    console.error('[realtime-ticket]', error.message);
+    return res.status(503).json({ valid: false, error: 'realtime unavailable' });
+  }
+}
+
 // ═══ /api/start ═══
 async function handleStart(req, res, ip) {
   const { hwid } = req.body || {};
 
   if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
     return res.status(400).json({ error: 'invalid hwid' });
+
+  if (!checkRateLimit(ip))
+    return res.status(429).json({ error: 'Rate limited' });
 
   const reason = checkRevoked({ hwid, ip });
   if (reason)
@@ -811,8 +912,7 @@ async function handleStart(req, res, ip) {
 
 // ═══ /api/admin/ban ═══
 async function handleAdminBan(req, res) {
-  if (!isAdminRequest(req))
-    return res.status(401).json({ error: 'unauthorized' });
+  if (!hasAdminAccess(req)) return res.status(401).json({ error: 'unauthorized' });
 
   const { type, value } = req.body || {};
   if (typeof value !== 'string' || value.length < 1 || value.length > 512)
