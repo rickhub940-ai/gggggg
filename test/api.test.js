@@ -271,6 +271,8 @@ async function main() {
   assert.equal(stage3Res.status, 200, 'Stage 3 link works');
   const stage3 = await stage3Res.text();
   assert.equal(/stage-pickup/.test(stage3), false, 'Stage 3 names no pickup endpoint');
+  assert.match(stage3, /^local gamaramam = \{ "[^"]+" \};/,
+    'Stage 3 opens with the same readable header');
   assert.notEqual((await fetch(stage3Url, { redirect: 'manual' })).status, 200,
     'Stage 3 link is single use');
 

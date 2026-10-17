@@ -403,7 +403,12 @@ function readArtifact(name) {
 const LOADER_SCRIPT_NORMALIZER = 'local e=getgenv();local s=e.script;if type(s)~="string"or#s<1 or#s>64 or not s:match("^[%w_%-]+$")then e.script="main"end;';
 
 function renderLoaderArtifact() {
-  return `${LOADER_SCRIPT_NORMALIZER}${readArtifact('loader')}`;
+  const artifact = readArtifact('loader');
+  // The header table stays the first thing in the file, so every stage of the
+  // chain opens with the same readable `local gamaramam = { … }` line.
+  const head = artifact.indexOf('};');
+  if (head < 0) return `${LOADER_SCRIPT_NORMALIZER}${artifact}`;
+  return `${artifact.slice(0, head + 2)}${LOADER_SCRIPT_NORMALIZER}${artifact.slice(head + 2)}`;
 }
 
 // ═══ Stage rendering ═══
