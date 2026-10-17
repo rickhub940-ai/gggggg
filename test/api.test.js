@@ -1,60 +1,22 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const http = require('node:http');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 
 const port = 30_000 + (process.pid % 10_000);
-const adminPort = port + 1;
 const env = {
   ...process.env,
   PORT: String(port),
   PUBLIC_BASE_URL: `http://127.0.0.1:${port}`,
-  REALTIME_WS_URL: 'wss://loader999mss-realtime.onrender.com/realtime',
   TICKET_SECRET: 'ticket-test-secret-at-least-thirty-two-characters',
-  REALTIME_TICKET_SECRET: 'realtime-test-secret-at-least-thirty-two-characters',
   PAYLOAD_XOR_KEY: 'payload-test-key',
   ADMIN_TOKEN: 'admin-ui-test-token-at-least-thirty-two-characters',
-  REALTIME_ADMIN_TOKEN: 'realtime-admin-test-token-at-least-thirty-two-characters',
-  REALTIME_ADMIN_URL: `http://127.0.0.1:${adminPort}`,
 };
 process.env.TICKET_SECRET = env.TICKET_SECRET;
-process.env.REALTIME_TICKET_SECRET = env.REALTIME_TICKET_SECRET;
-const { hashHwid, issueTicket } = require('../lib/ticket');
-const { verifyRealtimeTicket } = require('../lib/realtime-ticket');
 
-let remoteCommand = null;
-const remote = http.createServer((req, res) => {
-  if (req.headers.authorization !== `Bearer ${env.REALTIME_ADMIN_TOKEN}`) {
-    res.writeHead(401, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ ok: false }));
-  }
-  if (req.method === 'GET' && req.url === '/admin/sessions') {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({
-      ok: true,
-      sessions: [{
-        sessionId: 'f'.repeat(24), hwidHash: 'a'.repeat(64), scriptName: 'main',
-        connectedAt: 1000, lastActivityAt: 2000, idleMs: 100,
-      }],
-    }));
-  }
-  if (req.method === 'POST' && req.url === '/admin/command') {
-    const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => {
-      remoteCommand = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
-    });
-    return;
-  }
-  res.writeHead(404, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ ok: false }));
-});
-const remoteReady = new Promise((resolve) => remote.listen(adminPort, '127.0.0.1', resolve));
+const { hashHwid, issueTicket } = require('../lib/ticket');
 
 const child = spawn(process.execPath, ['server.js'], {
   cwd: path.join(__dirname, '..'), env, stdio: ['ignore', 'pipe', 'pipe'],
@@ -62,19 +24,17 @@ const child = spawn(process.execPath, ['server.js'], {
 
 function stop() {
   if (!child.killed) child.kill('SIGTERM');
-  remote.close();
 }
 
-async function post(pathname, body) {
+async function post(pathname, body, headers = {}) {
   return fetch(`http://127.0.0.1:${port}${pathname}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-roblox-client': 'test' },
+    headers: { 'content-type': 'application/json', 'x-roblox-client': 'test', ...headers },
     body: JSON.stringify(body),
   });
 }
 
 async function main() {
-  await remoteReady;
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('startup timeout')), 5_000);
     child.stdout.on('data', (data) => {
@@ -86,95 +46,87 @@ async function main() {
     child.once('error', reject);
   });
 
-  const dashboard = await fetch(`http://127.0.0.1:${port}/admin`);
-  assert.equal(dashboard.status, 200);
-  assert.match(await dashboard.text(), /999MS Realtime Control/);
-  const unauthorized = await fetch(`http://127.0.0.1:${port}/api/realtime/sessions`);
-  assert.equal(unauthorized.status, 401);
-  const listed = await fetch(`http://127.0.0.1:${port}/api/realtime/sessions`, {
-    headers: { 'x-admin-token': env.ADMIN_TOKEN },
-  });
-  assert.equal(listed.status, 200);
-  assert.equal((await listed.json()).sessions[0].sessionId, 'f'.repeat(24));
-  const controlled = await post('/api/realtime/command', {
-    sessionId: 'f'.repeat(24), command: 'disconnect', message: 'test',
-  });
-  assert.equal(controlled.status, 401);
-  const command = await fetch(`http://127.0.0.1:${port}/api/realtime/command`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-admin-token': env.ADMIN_TOKEN },
-    body: JSON.stringify({ sessionId: 'f'.repeat(24), command: 'disconnect', message: 'test' }),
-  });
-  assert.equal(command.status, 200);
-  assert.deepEqual(remoteCommand, { jti: 'f'.repeat(24), command: 'disconnect', reason: 'test' });
+  // ── health ──
+  const health = await fetch(`http://127.0.0.1:${port}/api/health`);
+  assert.equal(health.status, 200);
+  const healthBody = await health.json();
+  assert.equal(healthBody.ok, true);
+  assert.equal(healthBody.service, '999MS');
+  assert.equal(healthBody.realtime, undefined, 'health must not advertise realtime');
 
-  const hwid = 'api-test-hwid';
-  const ticket = issueTicket({ scope: 'script', hwidHash: hashHwid(hwid), userId: '7', scriptName: 'main' });
-  const response = await post('/api/realtime-ticket', { ticket, hwid, scriptName: 'main' });
-  assert.equal(response.status, 200);
-  const data = await response.json();
-  assert.equal(data.valid, true);
-  assert.equal(data.url, env.REALTIME_WS_URL);
-  const claims = verifyRealtimeTicket(data.token);
-  assert.equal(claims.hwidHash, hashHwid(hwid));
-  assert.equal(claims.scriptName, 'main');
+  // ── the realtime/WebSocket surface is gone ──
+  for (const gone of ['/admin', '/api/realtime-ticket', '/api/realtime/sessions',
+    '/api/realtime/command', '/api/session-renew']) {
+    const get = await fetch(`http://127.0.0.1:${port}${gone}`, { redirect: 'manual' });
+    assert.ok(get.status >= 300 || get.status === 404, gone + ' must be gone, got ' + get.status);
+    const posted = await post(gone, {});
+    assert.ok(posted.status >= 300 || posted.status === 404, gone + ' POST must be gone, got ' + posted.status);
+  }
 
-  const rejected = await post('/api/realtime-ticket', { ticket, hwid: 'wrong-hwid', scriptName: 'main' });
-  assert.equal(rejected.status, 403);
-  assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
+  // ── control panel API (HTTP only) ──
+  const denied = await post('/api/control/bans', {});
+  assert.equal(denied.status, 401);
+  const bans = await post('/api/control/bans', {}, { 'x-admin-token': env.ADMIN_TOKEN });
+  assert.equal(bans.status, 200);
+  const bansBody = await bans.json();
+  assert.equal(bansBody.ok, true);
+  assert.equal(typeof bansBody.stats.hwids, 'number');
 
-  // Regression: the shipped payload sends its RNG challenge with /api/script,
-  // so /api/verify must not reject a payload-style body for missing Rng fields.
+  const traffic = await post('/api/control/traffic', { limit: 5 }, { 'x-admin-token': env.ADMIN_TOKEN });
+  assert.equal(traffic.status, 200);
+  assert.equal(Array.isArray((await traffic.json()).traffic), true);
+
+  const removedControl = await post('/api/control/sessions', {}, { 'x-admin-token': env.ADMIN_TOKEN });
+  assert.ok(removedControl.status >= 300 || removedControl.status === 404);
+
+  // ── ban enforcement ──
+  const banned = await post('/api/admin/ban', { type: 'hwid', value: 'banned-hwid' }, { 'x-admin-token': env.ADMIN_TOKEN });
+  assert.equal(banned.status, 200);
+  const bannedVerify = await post('/api/verify', { key: 'KEY_TEST', hwid: 'banned-hwid', scriptName: 'main' });
+  assert.equal(bannedVerify.status, 403);
+
+  // ── regression: payload-style /api/verify without RNG still reaches key checks ──
   const payloadStyleVerify = await post('/api/verify', {
-    key: 'KEY_TEST', hwid, scriptName: 'main', userId: '7',
+    key: 'KEY_TEST', hwid: 'api-test-hwid', scriptName: 'main', userId: '7',
   });
   const payloadStyleBody = await payloadStyleVerify.json().catch(() => ({}));
   assert.notEqual(payloadStyleBody.error, 'RNG integers rejected',
     'payload-style /api/verify must reach key verification');
 
-  // A caller that does supply malformed RNG is still rejected.
   const forgedVerify = await post('/api/verify', {
-    key: 'KEY_TEST', hwid, scriptName: 'main',
+    key: 'KEY_TEST', hwid: 'api-test-hwid', scriptName: 'main',
     Rng1: 1.5, Rng2: 1, Rng3: 1, Rng4: 1, Rng5: 1, RngFloat: 2,
   });
   assert.equal(forgedVerify.status, 400);
   assert.equal((await forgedVerify.json()).error, 'RNG integers rejected');
 
-  // Regression: the shipped main.lua must never kick for a slow/missing
-  // realtime link. Only an explicit admin disconnect may kick.
+  // ── ticket flow still works without realtime ──
+  const hwid = 'api-test-hwid';
+  const ticket = issueTicket({ scope: 'script', hwidHash: hashHwid(hwid), userId: '7', scriptName: 'main' });
+  const script = await post('/api/script-verify', {
+    ticket, hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
+  });
+  assert.equal(script.status, 403); // token/secret mismatch is still enforced
+  const invalid = await post('/api/script-verify', { ticket: 'bad' });
+  assert.equal(invalid.status, 401); // malformed ticket is rejected before any proof check
+
+  // ── artifacts are plain, readable Lua ──
+  for (const file of ['loadc', 'loader', 'payload']) {
+    const res = await fetch(`http://127.0.0.1:${port}/${file}.lua`, {
+      headers: { 'x-roblox-client': 'test' },
+    });
+    assert.equal(res.status, 200, file + ' should serve');
+    const body = await res.text();
+    assert.ok(!/WeAreDevs|obfuscate/i.test(body), file + ' must stay readable');
+  }
+
+  // ── client Lua must not carry any realtime code ──
   const mainLua = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
-  assert.equal(/Realtime connection timeout/.test(mainLua), false,
-    'main.lua must not kick on realtime timeout');
-  assert.equal(/Realtime connection lost/.test(mainLua), false,
-    'main.lua must not kick when the realtime link drops');
-  assert.match(mainLua, /continuing without it/);
+  assert.equal(/WebSocket|websocket|realtime|Realtime/i.test(mainLua), false,
+    'main.lua must not reference the realtime system');
 
-  // Realtime keep-alive contract: 1s heartbeat, session renewal endpoint exists.
-  assert.match(mainLua, /HEARTBEAT_EVERY = 1/, 'client heartbeats every second');
-  assert.match(mainLua, /session-renew/, 'client renews its ticket when it ages out');
-  assert.match(mainLua, /reconnecting/, 'client reconnects automatically');
-  assert.equal(/Realtime connection lost/.test(mainLua), false);
-
-  const renewMissing = await post('/api/session-renew', {});
-  assert.equal(renewMissing.status, 400);
-  const renewBad = await post('/api/session-renew', { sessionToken: 'x'.repeat(80), hwid: 'api-test-hwid' });
-  assert.equal(renewBad.status, 401);
-  const { issueSessionToken, hashHwid: hh } = require('../lib/ticket.js');
-  const validSession = issueSessionToken({ jti: 'f'.repeat(24), hwidHash: hh('api-test-hwid'), scriptName: 'main' });
-  const renewWrongHwid = await post('/api/session-renew', { sessionToken: validSession, hwid: 'someone-else' });
-  assert.equal(renewWrongHwid.status, 403);
-  const renewOk = await post('/api/session-renew', { sessionToken: validSession, hwid: 'api-test-hwid', scriptName: 'main' });
-  assert.equal(renewOk.status, 200);
-  const renewBody = await renewOk.json();
-  assert.equal(renewBody.valid, true);
-  assert.equal(typeof renewBody.ticket, 'string');
-  assert.equal(typeof renewBody.realtime.token, 'string');
-
-  console.log('PASS API realtime ticket binding');
+  console.log('PASS API without realtime');
 }
 
-main().then(stop).catch((error) => {
-  stop();
-  console.error(error);
-  process.exitCode = 1;
-});
+main().then(() => { stop(); process.exit(0); })
+  .catch((error) => { console.error(error); stop(); process.exit(1); });

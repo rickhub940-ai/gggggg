@@ -3,8 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { verifyKey, createLink } = require('../lib/platoboost');
-const { issueTicket, verifyTicket, issueSessionToken, verifySessionToken, hashHwid } = require('../lib/ticket');
-const { issueRealtimeTicket } = require('../lib/realtime-ticket');
+const { issueTicket, verifyTicket, hashHwid } = require('../lib/ticket');
 const {
   createChallengeResponse,
   validateClientChallenge,
@@ -116,37 +115,14 @@ function publicBaseUrl() {
   }
 }
 
-function realtimeWsUrl() {
-  const value = process.env.REALTIME_WS_URL;
-  if (typeof value !== 'string' || value.length > 2048) return null;
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== 'wss:' || parsed.username || parsed.password || parsed.search || parsed.hash) return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
+// LOADA_PATH_SECRET is optional when the already-required TICKET_SECRET is
+// present. The sole Stage-1 capability is stateless, so its Stage-2 fetch can
+// land on a different Vercel instance without a database.
 function timingSafeStringEquals(supplied, expectedValue) {
   if (typeof supplied !== 'string' || typeof expectedValue !== 'string') return false;
   const expected = Buffer.from(expectedValue, 'utf8');
   const candidate = Buffer.from(supplied, 'utf8');
   return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
-}
-
-function realtimeAdminBaseUrl() {
-  const value = process.env.REALTIME_ADMIN_URL || process.env.REALTIME_WS_URL;
-  if (typeof value !== 'string' || value.length > 2048) return null;
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
-    if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
-    if ((parsed.protocol !== 'https:' && parsed.protocol !== 'http:') || parsed.username || parsed.password) return null;
-    return parsed.origin;
-  } catch {
-    return null;
-  }
 }
 
 function hasAdminAccess(req) {
@@ -155,39 +131,6 @@ function hasAdminAccess(req) {
     && timingSafeStringEquals(req.headers['x-admin-token'], expected);
 }
 
-function realtimeAdminToken() {
-  const value = process.env.REALTIME_ADMIN_TOKEN;
-  if (typeof value === 'string' && value.length >= 32) return value;
-  // Fall back to a token derived from the shared realtime secret so the gateway
-  // needs no second copied credential. The gateway accepts the same derivation.
-  const secret = process.env.REALTIME_TICKET_SECRET;
-  if (typeof secret === 'string' && secret.length >= 32) {
-    return crypto.createHmac('sha256', secret).update('999MS socket admin v1').digest('hex');
-  }
-  return null;
-}
-
-async function realtimeAdminRequest(route, options = {}) {
-  const base = realtimeAdminBaseUrl();
-  const token = realtimeAdminToken();
-  if (!base || !token) return null;
-  const response = await fetch(`${base}${route}`, {
-    method: options.method || 'GET',
-    headers: {
-      authorization: `Bearer ${token}`,
-      ...(options.body ? { 'content-type': 'application/json' } : {}),
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-    signal: AbortSignal.timeout(8_000),
-  });
-  let payload = null;
-  try { payload = await response.json(); } catch {}
-  return { response, payload };
-}
-
-// LOADA_PATH_SECRET is optional when the already-required TICKET_SECRET is
-// present. The sole Stage-1 capability is stateless, so its Stage-2 fetch can
-// land on a different Vercel instance without a database.
 function loadaPathSecret() {
   const secret = process.env.LOADA_PATH_SECRET || process.env.TICKET_SECRET;
   return typeof secret === 'string' && secret.length >= 32 ? secret : null;
@@ -264,7 +207,7 @@ function isBrowserRequest(req) {
 }
 
 // ═══ Main handler ═══
-const CONTROL_ACTIONS = new Set(['control-sessions', 'control-command', 'control-bans', 'control-traffic']);
+const CONTROL_ACTIONS = new Set(['control-bans', 'control-traffic']);
 // Ring buffer of the last 200 requests (no bodies, keys, HWIDs or tickets) so
 // the panel can show what an executor actually fetched and which status it got.
 const trafficLog = [];
@@ -333,7 +276,6 @@ module.exports = async function handler(req, res) {
       service: '999MS',
       version: '3.0.0',
       chain: '999MS-chain-v1',
-      realtime: Boolean(process.env.REALTIME_WS_URL),
       ts: Date.now(),
     });
   }
@@ -350,37 +292,6 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, count: trafficLog.length, traffic: trafficLog.slice(-limit).reverse() });
     }
 
-    if (action === 'control-sessions') {
-      const result = await realtimeAdminRequest('/admin/sessions');
-      const reachable = Boolean(result && result.response && result.response.ok);
-      const sessions = reachable
-        ? (result.payload?.sessions || []).map((entry) => safeRealtimeSession(entry)).filter(Boolean)
-        : [];
-      return res.status(200).json({
-        ok: reachable,
-        gateway: { reachable, reason: reachable ? null : 'gateway_unreachable', version: null },
-        count: sessions.length,
-        sessions,
-        now: Date.now(),
-      });
-    }
-
-    if (action === 'control-command') {
-      const body = req.body || {};
-      const jti = typeof body.jti === 'string' ? body.jti : (typeof body.sessionId === 'string' ? body.sessionId : '');
-      const commandName = typeof body.command === 'string' ? body.command : '';
-      if (!/^[a-f0-9]{24}$/.test(jti)) return res.status(400).json({ ok: false, reason: 'invalid jti' });
-      if (!['notice', 'reauth', 'disconnect'].includes(commandName)) {
-        return res.status(400).json({ ok: false, reason: 'invalid command' });
-      }
-      const payload = { jti, command: commandName };
-      if (commandName === 'disconnect') payload.reason = String(body.reason || 'admin disconnect').slice(0, 128);
-      else payload.message = String(body.message || '').slice(0, 256);
-      const result = await realtimeAdminRequest('/admin/command', { method: 'POST', body: payload });
-      const ok = Boolean(result && result.response && result.response.ok && result.payload?.ok === true);
-      return res.status(ok ? 200 : 502).json({ ok });
-    }
-
     // control-bans
     return res.status(200).json({
       ok: true,
@@ -389,21 +300,6 @@ module.exports = async function handler(req, res) {
       scope: 'instance',
       note: 'In-memory revocations apply to this function instance; env REVOKED_* entries apply everywhere.',
     });
-  }
-
-  if (action === 'dashboard') {
-    if (req.method !== 'GET') return res.status(405).send('');
-    return serveAdminDashboard(res);
-  }
-
-  if (action === 'realtime-sessions') {
-    if (req.method !== 'GET') return res.status(405).json({ error: 'method not allowed' });
-    return await handleRealtimeSessions(req, res);
-  }
-
-  if (action === 'realtime-command') {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
-    return await handleRealtimeCommand(req, res);
   }
 
   if (action === 'trap') return rejectOrTrap(req, res);
@@ -417,7 +313,7 @@ module.exports = async function handler(req, res) {
   const ct = req.headers['content-type'] || '';
   if (!ct.includes('application/json')) return rejectOrTrap(req, res, 415);
 
-  const validActions = ['verify', 'script', 'script-verify', 'heartbeat', 'realtime-ticket', 'session-renew', 'start', 'admin-ban'];
+  const validActions = ['verify', 'script', 'script-verify', 'heartbeat', 'start', 'admin-ban'];
   if (!action || !validActions.includes(action)) return rejectOrTrap(req, res);
 
   res.setHeader('Cache-Control', 'no-store');
@@ -435,9 +331,7 @@ module.exports = async function handler(req, res) {
       case 'verify':         return await handleVerify(req, res, ip);
       case 'script':         return await handleScript(req, res, ip);
       case 'script-verify':  return await handleScriptVerify(req, res);
-      case 'session-renew':  return await handleSessionRenew(req, res, ip);
       case 'heartbeat':      return await handleHeartbeat(req, res, ip);
-      case 'realtime-ticket': return await handleRealtimeTicket(req, res, ip);
       case 'start':          return await handleStart(req, res, ip);
       case 'admin-ban':      return await handleAdminBan(req, res);
       default:
@@ -448,77 +342,6 @@ module.exports = async function handler(req, res) {
     return res.status(502).json({ error: 'Service unavailable' });
   }
 };
-
-function serveAdminDashboard(res) {
-  try {
-    const body = fs.readFileSync(path.join(process.cwd(), 'admin', 'dashboard.html'), 'utf8');
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-store, max-age=0');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    return res.status(200).send(body);
-  } catch {
-    return res.status(503).send('');
-  }
-}
-
-function safeRealtimeSession(value, now = Date.now()) {
-  if (!value || typeof value !== 'object') return null;
-  // Older gateway builds reported `jti`; newer ones report `sessionId`. Accept
-  // both so a rollout on either side cannot empty the panel.
-  const sessionId = /^[a-f0-9]{24}$/.test(value.sessionId || '') ? value.sessionId
-    : (/^[a-f0-9]{24}$/.test(value.jti || '') ? value.jti : '');
-  if (!sessionId) return null;
-  if (!/^[a-f0-9]{64}$/.test(value.hwidHash || '') || !isValidScriptName(value.scriptName)) return null;
-  if (!Number.isFinite(value.connectedAt) || !Number.isFinite(value.lastActivityAt)) return null;
-  const idleMs = Number.isFinite(value.idleMs)
-    ? value.idleMs
-    : Math.max(0, now - value.lastActivityAt);
-  return {
-    sessionId,
-    hwidHash: value.hwidHash,
-    scriptName: value.scriptName,
-    connectedAt: value.connectedAt,
-    lastActivityAt: value.lastActivityAt,
-    idleMs: Math.max(0, Math.floor(idleMs)),
-  };
-}
-
-async function handleRealtimeSessions(req, res) {
-  if (!hasAdminAccess(req)) return res.status(401).json({ error: 'unauthorized' });
-  try {
-    const result = await realtimeAdminRequest('/admin/sessions');
-    if (!result || !result.response.ok || result.payload?.ok !== true || !Array.isArray(result.payload.sessions)) {
-      return res.status(502).json({ error: 'realtime unavailable' });
-    }
-    const sessions = result.payload.sessions.map((entry) => safeRealtimeSession(entry)).filter(Boolean).slice(0, 500);
-    return res.status(200).json({ ok: true, now: Date.now(), sessions });
-  } catch {
-    return res.status(502).json({ error: 'realtime unavailable' });
-  }
-}
-
-async function handleRealtimeCommand(req, res) {
-  if (!hasAdminAccess(req)) return res.status(401).json({ error: 'unauthorized' });
-  const { sessionId, command, message } = req.body || {};
-  if (typeof sessionId !== 'string' || !/^[a-f0-9]{24}$/.test(sessionId)
-    || !['disconnect', 'reauth', 'notice'].includes(command)
-    || (message !== undefined && (typeof message !== 'string' || message.length > 128))) {
-    return res.status(400).json({ error: 'invalid command' });
-  }
-  const body = { jti: sessionId, command };
-  if (command === 'disconnect') body.reason = message || 'session ended';
-  else if (message) body.message = message;
-  try {
-    const result = await realtimeAdminRequest('/admin/command', { method: 'POST', body });
-    if (!result || !result.response.ok || result.payload?.ok !== true) {
-      return res.status(502).json({ error: 'realtime unavailable' });
-    }
-    return res.status(200).json({ ok: true });
-  } catch {
-    return res.status(502).json({ error: 'realtime unavailable' });
-  }
-}
 
 function readArtifact(name) {
   const filename = ARTIFACT_FILES[name];
@@ -801,70 +624,7 @@ async function handleScriptVerify(req, res) {
     session.verifiedAt = Date.now();
   }
 
-  // Long-lived session token: the client trades it for fresh 30-minute tickets
-  // when it reconnects to the realtime gateway, so a steady connection can be
-  // kept for the whole play session without re-verifying the key every 30 min.
-  const sessionToken = issueSessionToken({
-    jti: payload.jti,
-    hwidHash: payload.hwidHash,
-    userId: payload.userId || null,
-    scriptName: payload.scriptName,
-  });
-
-  return res.status(200).json({
-    valid: true, serverId: payload.jti, diagnostic: 'D2_OK', sessionToken,
-  });
-}
-
-// ═══ /api/session-renew ═══
-// Exchange a valid session token + matching HWID for a fresh short ticket and a
-// fresh realtime token. Bans and revocations are still enforced on every call.
-async function handleSessionRenew(req, res, ip) {
-  const { sessionToken, hwid, scriptName } = req.body || {};
-
-  if (typeof sessionToken !== 'string' || sessionToken.length > 4096)
-    return res.status(400).json({ valid: false, error: 'sessionToken required' });
-  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
-    return res.status(400).json({ valid: false, error: 'invalid hwid format' });
-
-  const session = verifySessionToken(sessionToken);
-  if (!session) return res.status(401).json({ valid: false, error: 'session expired' });
-  if (session.hwidHash !== hashHwid(hwid))
-    return res.status(403).json({ valid: false, error: 'hwid mismatch' });
-  if (typeof scriptName === 'string' && scriptName !== session.scriptName)
-    return res.status(403).json({ valid: false, error: 'script mismatch' });
-
-  const reason = checkRevoked({ hwid, userId: session.userId, ip });
-  if (reason) return res.status(403).json({ valid: false, error: 'Banned: ' + reason });
-
-  const ticket = issueTicket({
-    hwidHash: session.hwidHash,
-    scope: 'script',
-    userId: session.userId || null,
-    scriptName: session.scriptName,
-  });
-  const claims = verifyTicket(ticket);
-  const realtime = issueRealtimeTicket({
-    jti: claims.jti,
-    hwidHash: session.hwidHash,
-    scriptName: session.scriptName,
-  });
-
-  return res.status(200).json({
-    valid: true,
-    ticket,
-    sessionToken: issueSessionToken({
-      jti: claims.jti,
-      hwidHash: session.hwidHash,
-      userId: session.userId || null,
-      scriptName: session.scriptName,
-    }),
-    realtime: {
-      url: process.env.REALTIME_WS_URL || '',
-      token: realtime,
-      expiresAt: claims.exp * 1000,
-    },
-  });
+  return res.status(200).json({ valid: true, serverId: payload.jti, diagnostic: 'D2_OK' });
 }
 
 // ═══ /api/heartbeat ═══
@@ -932,29 +692,6 @@ function verifiedScriptContext(ticket, hwid, scriptName, ip) {
   return { payload, name, hwidHash: hashHwid(hwid) };
 }
 
-async function handleRealtimeTicket(req, res, ip) {
-  const { ticket, hwid, scriptName } = req.body || {};
-  const context = verifiedScriptContext(ticket, hwid, scriptName, ip);
-  if (context.error) return res.status(context.status).json({ valid: false, error: context.error });
-  const payload = context.payload;
-  const name = context.name;
-
-  const url = realtimeWsUrl();
-  if (!url) return res.status(503).json({ valid: false, error: 'realtime unavailable' });
-  try {
-    const realtimeTicket = issueRealtimeTicket({
-      jti: payload.jti,
-      hwidHash: payload.hwidHash,
-      scriptName: name,
-    });
-    return res.status(200).json({ valid: true, url, token: realtimeTicket, expiresAt: payload.exp * 1000 });
-  } catch (error) {
-    console.error('[realtime-ticket]', error.message);
-    return res.status(503).json({ valid: false, error: 'realtime unavailable' });
-  }
-}
-
-// ═══ /api/start ═══
 async function handleStart(req, res, ip) {
   const { hwid } = req.body || {};
 
