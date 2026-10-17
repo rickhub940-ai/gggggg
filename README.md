@@ -52,3 +52,22 @@ PORT=10000 node server.js
 - `@BASE_URL@` ใน source ถูกแทนด้วย host ที่ executor เรียกเข้ามาจริง (ทำงานบน preview/โดเมนใหม่ได้)
 - Stage 1 pin SHA-256 ของ Stage 2 ที่ render แล้ว
 - UA trap ของ artifact เป็น opt-in: `TRAP_BROWSER_ARTIFACTS=1`
+
+---
+
+## สถานะปัจจุบัน (2026-10-17)
+
+ตัวนี้คือตัวที่ใช้แทน **ทุกเวอร์ชันก่อนหน้า** แล้ว (ทั้ง `whilstkey` เดิม และ gateway รุ่นเก่า)
+
+| บริการ | ที่อยู่ | เวอร์ชัน |
+|---|---|---|
+| เว็บ + API | https://loader999mss.vercel.app | 3.0.0 (source-only) |
+| แผงควบคุม | https://loader999mss.vercel.app/control | — |
+| แดชบอร์ด realtime | https://loader999mss.vercel.app/admin | — |
+| Realtime gateway | https://loader999mss-realtime.onrender.com | 1.2.0 |
+
+ทดสอบหลังแทนที่: `/loadc.lua` 1803 B (Lua อ่านได้) → `/loada.lua/<cap>` 8085 B (SHA-256 ตรง pin)
+→ `/loader.lua` 20917 B → `/payload.lua` 30881 B · WS client ต่อ gateway ได้ · แผงควบคุมเห็น
+session (`sessionId`, `idleMs`) และสั่ง `notice` ถึง client ได้จริง
+
+จุดย้อนกลับ: tag `pre-source-package` ใน repo `whilstkey` และ `loader999mss-realtime`
