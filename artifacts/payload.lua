@@ -624,7 +624,14 @@ end
 local function EncodeJson(value)
     local kind = type(value)
     if kind == "nil" then return "null" end
-    if kind == "boolean" or kind == "number" then return tostring(value) end
+    if kind == "boolean" then return tostring(value) end
+    if kind == "number" then
+        -- tostring() truncates at 14 significant digits, which would round the
+        -- challenge values (they run up to 1e14). Emit integers exactly.
+        if value ~= value or value == math.huge or value == -math.huge then return "null" end
+        if value % 1 == 0 and Abs(value) < 2 ^ 53 then return string.format("%.0f", value) end
+        return string.format("%.17g", value)
+    end
     if kind == "string" then
         return '"' .. value:gsub('[%z\1-\31\\"]', function(ch)
             local map = { ['"'] = '\\"', ["\\"] = "\\\\", ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t" }
