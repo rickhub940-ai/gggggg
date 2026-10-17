@@ -275,12 +275,13 @@ local function TamperKick(code)
 end
 
 local function SecureEQ(a, b)
+    if type(a) ~= type(b) then return false end
     local T = {}
     if a ~= b then return false end
     T[a] = 3569
-    if not T[b] == 3569 then return false end
+    if T[b] ~= 3569 then return false end
     T[b] = nil
-    if not T[a] == nil then return false end
+    if T[a] ~= nil then return false end
     return true
 end
 
