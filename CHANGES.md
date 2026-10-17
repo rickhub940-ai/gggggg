@@ -123,3 +123,40 @@ loada.lua ไม่มี cap   → 302 (ถูกต้อง)
 /api/verify mobile UA → 400 key required (ไม่โดน trap แล้ว)
 path มั่ว             → 302 trap (เหมือนเดิม)
 ```
+
+---
+
+# 2026-10-17 (รอบ 4) — ต้นเหตุจริงของ MS9-0530EB6F (ไม่ใช่ UA)
+
+## หลักฐาน
+`MS9-0530EB6F` = `"[999MS] Loader fetch failed"` — บรรทัดใน stage 2 ที่ทำ
+`request({Url = BASE_URL .. "/loader.lua"})` แล้วไม่ได้ StatusCode 200
+
+ซอร์สที่อ่านได้รุ่นที่ใช้สร้าง artifact (`a602e84`, 14 ต.ค.) ทุกไฟล์ฝังค่า:
+```lua
+local BASE_URL = "https://keysytemdemo.vercel.app"
+```
+และ `artifacts/{loada,loader,payload}.lua` ถูก commit 15 ต.ค. (`45dd197`) จากซอร์สชุดนั้น
+
+`https://keysytemdemo.vercel.app` = **DEPLOYMENT_NOT_FOUND** (โปรเจกต์ถูกลบ) และไม่ได้อยู่กับ
+โปรเจกต์ใดในบัญชี → stage 2 fetch ไม่ได้ → Kick → เห็นเป็น "Session terminated" + reference
+(ฟังก์ชัน `Kick()` ตั้งใจแทนข้อความจริงด้วยรหัส hash จึงดูเหมือน "โดนเตะเฉย ๆ")
+
+## แก้
+1. ยึดโดเมนเก่าที่ artifact ฝังไว้กลับมาชี้ที่โปรเจกต์ `loader999mss`:
+   - `keysytemdemo.vercel.app` (ตัวที่ทำให้เกิดเคสนี้)
+   - `loader999ms.vercel.app`
+   - `loader999mss-realtime.vercel.app`
+2. เพิ่ม `GET /api/bootstrap` (คืนแค่ chain id 64 hex, ไม่มี secret/session) เพื่อรองรับ
+   `loadc.lua` รุ่นเก่าที่อาจค้างใน cache ของ executor
+3. คงการปิด UA trap จากรอบก่อนไว้ (คนละเรื่อง แต่ก็เป็นบั๊กจริงบนมือถือ)
+
+## ตรวจหลังแก้ (ทุก host ตอบเหมือนกันหมด)
+```
+/loader.lua 200 (217 KB) · /payload.lua 200 (404 KB) · /loadc.lua 200
+/api/bootstrap 200 {ok,id} · /api/health 200 · /api/verify 400 key required
+```
+
+## หมายเหตุ
+`payload.lua` รุ่นที่ deploy เรียก `/api/verify` → `/api/script` (Data envelope + XOR) →
+`/api/start` ด้วยฟิลด์ที่ตรงกับ handler ปัจจุบันทุกตัว จึงไม่ต้อง regenerate artifact

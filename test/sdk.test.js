@@ -94,7 +94,10 @@ assert.match(authSource, /table\.freeze/);
 assert.match(authSource, /debug and\(debug\.traceback\)/);
 assert.match(authSource, /MS999:S1:E01:CHAIN_ID_INVALID/);
 
-assert.doesNotMatch(authSource, /action === 'bootstrap'|handleBootstrap/);
+// The bootstrap action is kept only as a credential-free compatibility shim for
+// the Oct-14 loadc generation; it must never mint sessions or touch tickets.
+assert.match(authSource, /action === 'bootstrap'/);
+assert.doesNotMatch(authSource, /bootstrap[\s\S]{0,400}issueTicket/, 'bootstrap must not issue tickets');
 assert.match(authSource, /crypto\.randomBytes\(32\)\.toString\('hex'\)/);
 assert.match(authSource, /crypto\.randomBytes\(26\)\.toString\('hex'\)/);
 assert.match(authSource, /function createLoadaPathCapability\(\)/);
@@ -106,7 +109,7 @@ assert.match(authSource, /function wrapWeAreDevsOutput\(source\)/);
 assert.match(authSource, /const clientChallenge = validateClientChallenge\(req\.body\)/);
 assert.match(authSource, /check: createChallengeResponse\(clientChallenge\.values\)/);
 assert.match(authSource, /scriptBody = scriptBody/);
-assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap'), false);
+assert.equal(vercelConfig.routes.some((entry) => entry.src === '/api/bootstrap'), true);
 for (const name of ['loadc', 'loader', 'sdk']) {
   assert.equal(vercelConfig.routes.some((entry) => entry.dest === `/api/auth?action=artifact&name=${name}`), true);
 }

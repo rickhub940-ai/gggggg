@@ -264,6 +264,21 @@ module.exports = async function handler(req, res) {
   const url = new URL(req.url, 'http://x');
   const action = req.query?.action || url.searchParams.get('action');
 
+  // Legacy chain id endpoint. The Oct-14 generation of loadc.lua asked here for
+  // a 64-hex chain id before fetching Stage 2; a cached copy of that bootstrapper
+  // still runs on some executors. It returns no secrets and no session state.
+  if (action === 'bootstrap') {
+    if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.status(200).json({
+      ok: true,
+      id: crypto.randomBytes(32).toString('hex'),
+      chain: '999MS-chain-v1',
+      ts: Date.now(),
+    });
+  }
+
   // ═══ Control panel (browser-facing, ADMIN_TOKEN gated) ═══
   if (CONTROL_ACTIONS.has(action)) {
     res.setHeader('Cache-Control', 'no-store');
