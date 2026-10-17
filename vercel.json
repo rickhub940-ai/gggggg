@@ -1,7 +1,7 @@
 {
   "functions": {
     "api/*.js": {
-      "maxDuration": 10,
+      "maxDuration": 30,
       "includeFiles": "{scripts,artifacts}/**"
     }
   },
@@ -29,6 +29,22 @@
     {
       "src": "/999MS-sdk\\.lua",
       "dest": "/api/auth?action=artifact&name=sdk"
+    },
+    {
+      "src": "/control",
+      "dest": "/control.html"
+    },
+    {
+      "src": "/api/control/sessions",
+      "dest": "/api/auth?action=control-sessions"
+    },
+    {
+      "src": "/api/control/command",
+      "dest": "/api/auth?action=control-command"
+    },
+    {
+      "src": "/api/control/bans",
+      "dest": "/api/auth?action=control-bans"
     },
     {
       "src": "/api/health",

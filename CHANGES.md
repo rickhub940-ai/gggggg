@@ -47,3 +47,36 @@ trapped), unknown path 302 → trap.
 - H3: `userId` still comes from the client body.
 - H4: ban/session state is still per-instance (needs KV).
 - H5: WeAreDevs is still called on every `/loadc.lua`.
+
+---
+
+# 2026-10-17 (รอบ 2) — เว็บควบคุม client
+
+## Gateway `loader999mss-realtime` → v1.1.0 (deploy อัตโนมัติบน Render แล้ว)
+- `GET /admin/sessions` — รายชื่อ session ที่เชื่อมต่อ (jti, scriptName, hwidHash, connectedAt, lastActivityAt)
+- `GET /admin/stats` — จำนวน session + uptime
+- `/health` เพิ่ม `version` และ `uptime`
+- session เก็บ `hwidHash` ไว้ เพื่อให้แบนราย client ได้จากแดชบอร์ด
+- admin auth รับได้ทั้ง `SOCKET_ADMIN_TOKEN` และ token ที่ derive จาก
+  `REALTIME_TICKET_SECRET` (`HMAC-SHA256(secret, "999MS socket admin v1")`)
+  → Vercel กับ Render ไม่ต้องคัดลอก secret เพิ่ม และ browser ไม่เคยเห็น secret
+- test เพิ่มเคส 401/200 ของ `/admin/sessions`, `/admin/stats`, derived token
+
+## Vercel `whilstkey`
+- `public/control.html` → `/control` แดชบอร์ด:
+  login ด้วย ADMIN_TOKEN (เก็บใน sessionStorage), stat cards, ตาราง client,
+  notice/reauth/kick รายคน, แบน HWID จากแถว client, ฟอร์มแบน hwid/hwidHash/user/ip,
+  broadcast, kick ทั้งหมด, log, รีเฟรชอัตโนมัติ 15 วิ
+- `POST /api/control/sessions|command|bans` — proxy ไป gateway, ตรวจ ADMIN_TOKEN แบบ timing-safe,
+  trim/validate jti และ command whitelist (`notice|reauth|disconnect`)
+- `lib/revoke.js`: เพิ่ม `revokeHwidHash()` + `listRevocations()` และ type `hwidHash` ใน `/api/admin/ban`
+- `vercel.json`: routes `/control`, `/api/control/*`; `maxDuration` 30 วิ (รองรับ Render cold start)
+- `api/auth.js`: `isAdminRequest()` รับ `x-admin-token` หรือ `Authorization: Bearer`
+- landing page: เพิ่มลิงก์ Control ใน footer
+
+## ทดสอบ E2E บน production
+1. จำลอง client เชื่อม `wss://loader999mss-realtime.onrender.com/realtime` → handshake ผ่าน
+2. `POST /api/control/sessions` เห็น 1 session พร้อม hwidHash
+3. `POST /api/control/command` `notice` → client ได้รับ `{type:"command",command:"notice",message:"สวัสดีจากแดชบอร์ด"}` จริง
+4. `POST /api/admin/ban` type `hwidHash` → 200 และ `/api/control/bans` แสดงรายการ
+5. anon/bad token → 401 ทุก endpoint

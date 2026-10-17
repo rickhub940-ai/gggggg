@@ -14,7 +14,7 @@ const {
   verifyRuntimeProof,
 } = require('../lib/999MS-server-sdk');
 const {
-  revokeHwid, revokeUser, revokeIp, checkRevoked, stats,
+  revokeHwid, revokeHwidHash, revokeUser, revokeIp, checkRevoked, stats, listRevocations,
 } = require('../lib/revoke');
 
 const sessions = new Map();
@@ -103,6 +103,75 @@ function requestOrigin(req) {
   return `${proto}://${host}`;
 }
 
+// ═══ Control panel plumbing ═══
+// The panel authenticates with ADMIN_TOKEN, which never reaches the browser in
+// any other form. Calls to the Render gateway use SOCKET_ADMIN_TOKEN when it is
+// configured, otherwise the token derived from REALTIME_TICKET_SECRET that the
+// gateway also accepts — so no second secret has to be copied between hosts.
+const REALTIME_HTTP_FALLBACK = 'https://loader999mss-realtime.onrender.com';
+
+function realtimeHttpBase() {
+  try {
+    const url = new URL(process.env.REALTIME_WS_URL || '');
+    return `${url.protocol === 'wss:' ? 'https:' : 'http:'}//${url.host}`;
+  } catch {
+    return REALTIME_HTTP_FALLBACK;
+  }
+}
+
+function socketAdminToken() {
+  const explicit = process.env.SOCKET_ADMIN_TOKEN;
+  if (typeof explicit === 'string' && explicit.length >= 32) return explicit;
+  const secret = process.env.REALTIME_TICKET_SECRET;
+  if (typeof secret === 'string' && secret.length >= 32) {
+    return crypto.createHmac('sha256', secret).update('999MS socket admin v1').digest('hex');
+  }
+  return null;
+}
+
+function adminTokenFromRequest(req) {
+  const direct = req.headers['x-admin-token'];
+  if (typeof direct === 'string' && direct.length > 0) return direct;
+  const bearer = req.headers.authorization;
+  if (typeof bearer === 'string' && bearer.startsWith('Bearer ')) return bearer.slice(7);
+  return '';
+}
+
+function isAdminRequest(req) {
+  const expected = process.env.ADMIN_TOKEN;
+  return typeof expected === 'string' && expected.length >= 16
+    && timingSafeStringEquals(adminTokenFromRequest(req), expected);
+}
+
+async function gatewayRequest(pathname, options = {}) {
+  const token = socketAdminToken();
+  if (!token) return { ok: false, status: 503, data: { ok: false, reason: 'gateway_not_configured' } };
+  const controller = new AbortController();
+  // Render's free instance can take ~15 s to wake from idle.
+  const timeout = setTimeout(() => controller.abort(), 24000);
+  try {
+    const response = await fetch(`${realtimeHttpBase()}${pathname}`, {
+      ...options,
+      headers: { ...(options.headers || {}), authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    let data = {};
+    try { data = await response.json(); } catch { data = {}; }
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    const aborted = error.name === 'AbortError';
+    return {
+      ok: false,
+      status: aborted ? 504 : 502,
+      data: { ok: false, reason: aborted ? 'gateway_timeout' : 'gateway_unreachable' },
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const CONTROL_ACTIONS = new Set(['control-sessions', 'control-command', 'control-bans']);
+
 function timingSafeStringEquals(supplied, expectedValue) {
   if (typeof supplied !== 'string' || typeof expectedValue !== 'string') return false;
   const expected = Buffer.from(expectedValue, 'utf8');
@@ -184,6 +253,61 @@ function isBrowserRequest(req) {
 module.exports = async function handler(req, res) {
   const url = new URL(req.url, 'http://x');
   const action = req.query?.action || url.searchParams.get('action');
+
+  // ═══ Control panel (browser-facing, ADMIN_TOKEN gated) ═══
+  if (CONTROL_ACTIONS.has(action)) {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    if (req.method !== 'POST') return res.status(405).json({ ok: false, reason: 'method' });
+    if (!isAdminRequest(req)) return res.status(401).json({ ok: false, reason: 'unauthorized' });
+
+    if (action === 'control-sessions') {
+      const gateway = await gatewayRequest('/admin/sessions');
+      const health = await gatewayRequest('/admin/stats');
+      return res.status(gateway.ok ? 200 : gateway.status).json({
+        ok: gateway.ok,
+        gateway: {
+          reachable: gateway.status !== 502 && gateway.status !== 504,
+          version: gateway.data?.version || health.data?.version || null,
+          uptime: health.data?.uptime ?? null,
+          reason: gateway.data?.reason || null,
+        },
+        count: gateway.data?.count || 0,
+        sessions: Array.isArray(gateway.data?.sessions) ? gateway.data.sessions : [],
+        now: Date.now(),
+      });
+    }
+
+    if (action === 'control-command') {
+      const body = req.body || {};
+      const jti = typeof body.jti === 'string' ? body.jti : '';
+      const commandName = typeof body.command === 'string' ? body.command : '';
+      if (!/^[a-f0-9]{24}$/.test(jti)) return res.status(400).json({ ok: false, reason: 'invalid jti' });
+      if (!['notice', 'reauth', 'disconnect'].includes(commandName)) {
+        return res.status(400).json({ ok: false, reason: 'invalid command' });
+      }
+      const gateway = await gatewayRequest('/admin/command', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jti,
+          command: commandName,
+          message: typeof body.message === 'string' ? body.message.slice(0, 256) : '',
+          reason: typeof body.reason === 'string' ? body.reason.slice(0, 128) : '',
+        }),
+      });
+      return res.status(gateway.ok ? 200 : gateway.status).json(gateway.data);
+    }
+
+    // control-bans
+    return res.status(200).json({
+      ok: true,
+      stats: stats(),
+      lists: listRevocations(),
+      scope: 'instance',
+      note: 'In-memory revocations apply to this function instance; env REVOKED_* entries apply everywhere.',
+    });
+  }
 
   // Payload remains the static final handoff from the legacy stage chain.
   if (action === 'payload') {
@@ -723,10 +847,7 @@ async function handleStart(req, res, ip) {
 
 // ═══ /api/admin/ban ═══
 async function handleAdminBan(req, res) {
-  const token = req.headers['x-admin-token'];
-  const expected = process.env.ADMIN_TOKEN;
-
-  if (!expected || token !== expected)
+  if (!isAdminRequest(req))
     return res.status(401).json({ error: 'unauthorized' });
 
   const { type, value } = req.body || {};
@@ -735,6 +856,10 @@ async function handleAdminBan(req, res) {
 
   switch (type) {
     case 'hwid': revokeHwid(value); break;
+    case 'hwidHash':
+      if (!/^[a-f0-9]{64}$/i.test(value)) return res.status(400).json({ error: 'invalid hash' });
+      revokeHwidHash(value);
+      break;
     case 'user': revokeUser(value); break;
     case 'ip':   revokeIp(value);   break;
     default: return res.status(400).json({ error: 'invalid type' });
