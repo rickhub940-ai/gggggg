@@ -232,6 +232,16 @@ function consumeStageCapability(capability) {
   return true;
 }
 
+// Browser trapping is cosmetic anti-scraping, never authorization. Mobile
+// executors (Delta, Fluxus, …) send a Chrome-like User-Agent and language/`sec-*`
+// headers, which used to make the loader's own `/loader.lua` fetch receive a
+// 302 and die with "Loader fetch failed" (reference MS9-0530EB6F). Artifact and
+// API traffic is therefore served regardless of UA by default; set
+// TRAP_BROWSER_ARTIFACTS=1 to restore the old behaviour.
+function trapBrowserArtifacts() {
+  return process.env.TRAP_BROWSER_ARTIFACTS === '1';
+}
+
 function isBrowserRequest(req) {
   const headers = req.headers || {};
   if (hasRobloxHeader(req)) return false;
@@ -312,7 +322,7 @@ module.exports = async function handler(req, res) {
   // Payload remains the static final handoff from the legacy stage chain.
   if (action === 'payload') {
     if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
-    if (isBrowserRequest(req)) return trapRedirect(res);
+    if (trapBrowserArtifacts() && isBrowserRequest(req)) return trapRedirect(res);
     try {
       const body = readArtifact('payload');
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -328,7 +338,7 @@ module.exports = async function handler(req, res) {
   // capability. The remaining legacy artifacts keep their static handoffs.
   if (action === 'artifact') {
     if (req.method !== 'GET') return rejectOrTrap(req, res, 405);
-    if (isBrowserRequest(req)) return trapRedirect(res);
+    if (trapBrowserArtifacts() && isBrowserRequest(req)) return trapRedirect(res);
     const name = req.query?.name || url.searchParams.get('name');
     return await serveArtifact(req, res, name, url, requestOrigin(req));
   }
@@ -355,7 +365,7 @@ module.exports = async function handler(req, res) {
 
   // ═══ อื่นๆ: ต้อง POST ═══
   if (req.method !== 'POST') return rejectOrTrap(req, res, 405);
-  if (isBrowserRequest(req)) return trapRedirect(res);
+  if (trapBrowserArtifacts() && isBrowserRequest(req)) return trapRedirect(res);
 
   const ct = req.headers['content-type'] || '';
   if (!ct.includes('application/json')) return rejectOrTrap(req, res, 415);

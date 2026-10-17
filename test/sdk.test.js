@@ -333,7 +333,7 @@ const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=l
   assert.equal(robloxArtifact.statusCode, 200);
   assert.equal(executorArtifact.body.startsWith('--[['), false, 'WeAreDevs banner comment must be removed');
   assert.doesNotMatch(executorArtifact.body, /--\[\[\s*v[\d.]+\s+https?:\/\/wearedevs\.net\/obfuscator/i);
-  assert.equal(obfuscationInputs.length, 4, 'each permitted loadc request must be obfuscated');
+  assert.equal(obfuscationInputs.length, 5, 'each permitted loadc request must be obfuscated');
   assert.ok(obfuscationInputs.every((source) => !source.startsWith('--')), 'source submitted to WeAreDevs must be comment-free');
   const firstLoadc = parseRenderedLoadc(unwrapWeAreDevsLoadc(executorArtifact.body));
   const secondLoadc = parseRenderedLoadc(unwrapWeAreDevsLoadc(secondExecutorArtifact.body));
@@ -377,11 +377,15 @@ const executorArtifact = await requestEndpoint('/api/auth?action=artifact&name=l
   Date.now = actualNow;
   const unknownPath = await requestEndpoint('/api/auth?action=trap');
   const robloxUnknownPath = await requestEndpoint('/api/auth?action=trap', { 'X-Roblox': 'CLIENT' });
-  assert.equal(loadaBrowserPath.statusCode, 302);
-  assert.equal(loadaBrowserPath.headers.Location, 'https://yura.lol/09ms');
+  assert.equal(loadaBrowserPath.statusCode, 200);
+  assert.equal(loadaBrowserPath.headers.Location, undefined);
   assert.equal(loadaExpiredPath.statusCode, 404);
-  assert.equal(browserArtifact.statusCode, 302);
-  assert.equal(browserArtifact.headers.Location, 'https://yura.lol/09ms');
+  assert.equal(browserArtifact.statusCode, 200, 'executor-style browser UA must still receive loadc');
+  process.env.TRAP_BROWSER_ARTIFACTS = '1';
+  const trappedBrowserArtifact = await requestEndpoint('/api/auth?action=artifact&name=loadc', { 'user-agent': 'Mozilla/5.0' });
+  delete process.env.TRAP_BROWSER_ARTIFACTS;
+  assert.equal(trappedBrowserArtifact.statusCode, 302);
+  assert.equal(trappedBrowserArtifact.headers.Location, 'https://yura.lol/09ms');
   assert.equal(unknownPath.statusCode, 302);
   assert.equal(unknownPath.headers.Location, 'https://yura.lol/09ms');
   assert.equal(robloxUnknownPath.statusCode, 404);

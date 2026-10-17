@@ -80,3 +80,46 @@ trapped), unknown path 302 → trap.
 3. `POST /api/control/command` `notice` → client ได้รับ `{type:"command",command:"notice",message:"สวัสดีจากแดชบอร์ด"}` จริง
 4. `POST /api/admin/ban` type `hwidHash` → 200 และ `/api/control/bans` แสดงรายการ
 5. anon/bad token → 401 ทุก endpoint
+
+---
+
+# 2026-10-17 (รอบ 3) — แก้เคส "Session terminated / MS9-0530EB6F"
+
+## อาการ
+ผู้ใช้รัน `loadc.lua` บน executor Android (Delta/Fluxus) แล้วถูกเตะ:
+`[999MS] Session terminated. Reference: MS9-0530EB6F`
+
+## สาเหตุ (ยืนยันจาก production)
+`MS9-0530EB6F` = `"[999MS] Loader fetch failed"` (stage 2 `savecheck.lua` เมื่อ
+`GET /loader.lua` ไม่ได้ 200)
+
+`isBrowserRequest()` จัดให้ UA แบบ Chrome Android + `Accept-Language` + `sec-*`
+เป็น "browser" → `trapRedirect` 302 ไป `yura.lol/09ms` → executor ไม่ได้ Lua
+
+ทดสอบก่อนแก้:
+```
+UA=Roblox/WinInet        → 200
+UA=(none)                → 200
+UA=Chrome Android …      → 302  ← ต้นเหตุ
+Accept-Language: th-TH   → 302
+```
+
+## แก้
+- `api/auth.js`: artifact / payload / API POST **ไม่ถูก trap จาก UA อีกต่อไป**
+  (`if (trapBrowserArtifacts() && isBrowserRequest(req))`), ค่าเริ่มต้น = ปิด
+  เปิดคืนได้ด้วย env `TRAP_BROWSER_ARTIFACTS=1`
+- `/loada.lua` ยังต้องมี capability (302 ถ้าไม่มี) — ไม่ได้ลดความปลอดภัยของ chain
+- path มั่ว/`action=trap` ยังเด้งไป `yura.lol` เหมือนเดิม
+- เพิ่ม `scripts/decode-ref.js` + `scripts/reference-codes.json` (999+ mapping)
+  ไว้ถอดรหัส `MS9-XXXXXXXX` จากประวัติทุกไฟล์ Lua ใน repo
+
+## หลังแก้ (ทดสอบสด)
+```
+loadc.lua   mobile UA → 200 (34 KB)
+loader.lua  mobile UA → 200 (217 KB)
+payload.lua mobile UA → 200 (404 KB)
+999MS-sdk.lua         → 200
+loada.lua ไม่มี cap   → 302 (ถูกต้อง)
+/api/verify mobile UA → 400 key required (ไม่โดน trap แล้ว)
+path มั่ว             → 302 trap (เหมือนเดิม)
+```
