@@ -596,6 +596,12 @@ async function handleVerify(req, res, ip) {
   const { key, hwid, userId, scriptName } = req.body || {};
   // First request challenge: reject a simple forged `{ valid: true }` response
   // before issuing a signed ticket. The provider still owns key/device binding.
+  // The deployed payload sends its RNG challenge with /api/script (where it is
+  // verified against the decrypted `Data` envelope), so this gate only applies
+  // when the caller actually supplied RNG fields. Requiring them here made real
+  // clients fail with "RNG integers rejected" before their key was ever checked.
+  const challengeFields = ['Rng1', 'Rng2', 'Rng3', 'Rng4', 'Rng5', 'RngFloat'];
+  const challengeSupplied = challengeFields.some((field) => req.body?.[field] !== undefined);
   const clientChallenge = validateClientChallenge(req.body);
 
   if (typeof key !== 'string' || !key.trim())
@@ -606,7 +612,7 @@ async function handleVerify(req, res, ip) {
     return res.status(400).json({ valid: false, error: 'scriptName required' });
   if (!isValidScriptName(scriptName))
     return res.status(400).json({ valid: false, error: 'invalid scriptName format' });
-  if (!clientChallenge.ok)
+  if (challengeSupplied && !clientChallenge.ok)
     return res.status(400).json({ valid: false, error: clientChallenge.reason });
 
   const reason = checkRevoked({ hwid, userId, ip });
@@ -628,12 +634,9 @@ async function handleVerify(req, res, ip) {
     scriptName,
   });
 
-  return res.status(200).json({
-    valid: true,
-    ticket,
-    k: xorKey,
-    check: createChallengeResponse(clientChallenge.values),
-  });
+  const response = { valid: true, ticket, k: xorKey };
+  if (clientChallenge.ok) response.check = createChallengeResponse(clientChallenge.values);
+  return res.status(200).json(response);
 }
 
 // ═══ /api/script ═══

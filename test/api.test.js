@@ -121,6 +121,24 @@ async function main() {
   const rejected = await post('/api/realtime-ticket', { ticket, hwid: 'wrong-hwid', scriptName: 'main' });
   assert.equal(rejected.status, 403);
   assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
+
+  // Regression: the shipped payload sends its RNG challenge with /api/script,
+  // so /api/verify must not reject a payload-style body for missing Rng fields.
+  const payloadStyleVerify = await post('/api/verify', {
+    key: 'KEY_TEST', hwid, scriptName: 'main', userId: '7',
+  });
+  const payloadStyleBody = await payloadStyleVerify.json().catch(() => ({}));
+  assert.notEqual(payloadStyleBody.error, 'RNG integers rejected',
+    'payload-style /api/verify must reach key verification');
+
+  // A caller that does supply malformed RNG is still rejected.
+  const forgedVerify = await post('/api/verify', {
+    key: 'KEY_TEST', hwid, scriptName: 'main',
+    Rng1: 1.5, Rng2: 1, Rng3: 1, Rng4: 1, Rng5: 1, RngFloat: 2,
+  });
+  assert.equal(forgedVerify.status, 400);
+  assert.equal((await forgedVerify.json()).error, 'RNG integers rejected');
+
   console.log('PASS API realtime ticket binding');
 }
 

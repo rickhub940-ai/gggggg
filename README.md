@@ -80,3 +80,12 @@ session (`sessionId`, `idleMs`) และสั่ง `notice` ถึง client 
 
 หมายเหตุ: โฟลเดอร์ `render-package/` อยู่ใน repo **`loader999mss-realtime`** แยกต่างหาก
 (Render deploy จาก repo นั้น)
+
+## 2026-10-17 — แก้ "RNG integers rejected" ตอน Verify Key
+
+สาเหตุ: `/api/verify` บังคับ RNG challenge แต่ payload ที่ deploy ส่ง RNG ไปกับ `/api/script`
+(ฝั่งนั้นตรวจกับ `Data` envelope ที่ถอดรหัสแล้ว) → ผู้ใช้จริงเห็น error ก่อนคีย์ถูกตรวจ
+
+แก้: gate ที่ `/api/verify` บังคับเฉพาะเมื่อคำขอมี field `Rng1..Rng5/RngFloat` จริง
+(`challengeSupplied`) และตอบ `check` เฉพาะเมื่อคำนวณได้ — `/api/script` ยังตรวจ RNG เข้มเหมือนเดิม
+เพิ่ม regression test ใน `test/api.test.js`
