@@ -6,18 +6,73 @@ local gamaramam = {
 -- ═══ BODY ═══ everything below is compacted at build time.
 -- 999MS Bootstrap: essential chain and payload hand-off only.
 -- ===========================================================
-local ctx = ...
-if type(ctx) ~= "table" then error("MS999:CHAIN_CONTEXT_MISSING", 0) end
+local function Kick(reason)
+    local message = tostring(reason or "[999MS] Runtime error")
+    local coreGui
+    pcall(function() coreGui = game:GetService("CoreGui") end)
+
+    local function patchPrompt()
+        pcall(function()
+            local promptGui = coreGui and coreGui:FindFirstChild("RobloxPromptGui")
+            local overlay = promptGui and promptGui:FindFirstChild("promptOverlay")
+            local prompt = overlay and overlay:FindFirstChild("ErrorPrompt")
+            local titleFrame = prompt and prompt:FindFirstChild("TitleFrame")
+            local title = titleFrame and titleFrame:FindFirstChild("ErrorTitle")
+            local messageArea = prompt and prompt:FindFirstChild("MessageArea")
+            local errorFrame = messageArea and messageArea:FindFirstChild("ErrorFrame")
+            local text = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
+            if title and text then
+                title.Text = "[ 999MS ]"
+                text.Text = "Reason :  " .. message
+            end
+        end)
+    end
+
+    pcall(function()
+        if coreGui then
+            coreGui.ChildAdded:Connect(function(child)
+                if child.Name == "RobloxPromptGui" then
+                    task.wait(0.01)
+                    patchPrompt()
+                end
+            end)
+        end
+    end)
+    pcall(function()
+        task.spawn(function()
+            for _ = 1, 50 do
+                patchPrompt()
+                task.wait(0.01)
+            end
+        end)
+    end)
+
+    local player
+    pcall(function() player = game:GetService("Players").LocalPlayer end)
+    if player then
+        pcall(function()
+            if type(replicatesignal) == "function" then
+                replicatesignal(player.StatsAvailable, "Kick")
+            end
+        end)
+        pcall(function() player:Kick(message) end)
+    end
+    return false
+end
+
+local function Run(ctx)
+if type(ctx) ~= "table" then return Kick("MS999:CHAIN_CONTEXT_MISSING") end
 local function Abort(reason, detail)
     local stop = type(ctx) == "table" and ctx.stopChecks or nil
     if type(stop) == "function" then pcall(stop) end
     local message = "[999MS] " .. tostring(reason or "stage aborted")
     if type(detail) == "string" and detail ~= "" then message = message .. ": " .. detail end
+    pcall(Kick, reason or "stage aborted")
     if type(warn) == "function" then warn(message) else print(message) end
     return false
 end
 
-if ctx.sourceSaved then return Abort("source marker was saved") end
+if ctx.sourceSaved then return Abort("MS_112") end
 
 local BASE_URL = "@BASE_URL@"
 local CHAIN_VERSION = "999MS-chain-v1"
@@ -151,3 +206,8 @@ if not runOk then
     return Abort("[999MS] Runtime error", detail)
 end
 if payloadResult == false then return Abort("[999MS] Payload aborted") end
+end
+
+local ok, result = pcall(Run, ...)
+if not ok then return Kick("[999MS] Runtime error") end
+return result

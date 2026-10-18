@@ -153,6 +153,7 @@ local gamaramam = { "<base>/<token>" }
 
 - Local `/api/verify` จะบังคับ challenge ก่อนเรียก Platoboost; `/api/script` ยังคงตรวจ challenge หลังตรวจคีย์ และ `/api/script-verify` ตรวจ runtime proof หลังจากนั้น
 - `pack` / `buildEntries` ถูกเพิ่มเป็น scaffold ตามตัวอย่าง แต่ยังไม่ต่อเข้ากับ live `/api/q` protocol; `__stWireMask` และวิธี derive `wireKey` ยังไม่มี จึงไม่มีการอ้างว่าข้อมูลถูก mask แล้ว
+- Local-only update เพิ่ม kick เมื่อ Stage 1 (`loadc.template.lua`) หรือ Stage 3 (`loader.lua`) พบ error/exception รวม network, hash, compile, chain และ runtime failures; ใช้ CoreGui prompt, ลอง `replicatesignal` แบบ best-effort แล้ว fallback `LocalPlayer:Kick`. เส้นทางสำเร็จไม่ kick; executor/network transient failure ก็จะ kick ตามเงื่อนไขที่ร้องขอ
 - การเปลี่ยนชุดนี้ผ่าน tests/build ในเครื่อง แต่ยังไม่ push/deploy; production ยังเป็น `a10803f`
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด
