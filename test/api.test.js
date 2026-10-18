@@ -357,7 +357,8 @@ async function main() {
   const stage1Source = fs.readFileSync(path.join(__dirname, '..', 'source', 'loadc.template.lua'), 'utf8');
   const loaderSource = fs.readFileSync(path.join(__dirname, '..', 'source', 'loader.lua'), 'utf8');
   assert.match(stage1Source, /return chunk\(ctx\)/);
-  assert.match(stage1Source, /return Kick\("MS999:S1:E99:RUNTIME_ERROR"\)/);
+  assert.equal(/:Kick\s*\(|replicatesignal/.test(stage1Source), false,
+    'loadc Stage 1 must not contain kick behavior');
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8'), /pcall\(chunk, ctx\)/);
   assert.match(loaderSource, /pcall\(fn, ctx\)/);
   assert.match(loaderSource, /if ctx\.sourceSaved then return Abort\("MS_112"\) end/);
@@ -369,7 +370,7 @@ async function main() {
   assert.ok(payloadSource.includes('local StartupError = ""'), 'UI error text uses its own local');
   assert.equal(payloadSource.includes('local E1 = ""'), false, 'UI error text must not shadow RNG helper E1');
 
-  // ── kick handlers: BAD HWID/MS_112 plus explicit Stage 1/3 failures ──
+  // ── kick handlers: BAD HWID/MS_112 plus Stage 3 failures; Stage 1 stays kick-free ──
   const loaderSources = [
     fs.readFileSync(path.join(__dirname, '..', 'source', 'loadc.template.lua'), 'utf8'),
     fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8'),
@@ -377,12 +378,12 @@ async function main() {
     payloadSource,
     mainForContext,
   ].join('\n');
-  assert.equal((loaderSources.match(/:Kick\s*\(/g) || []).length, 5,
-    'loadc, savecheck, loader, payload, and final verifier contain the intended kick handlers');
+  assert.equal((loaderSources.match(/:Kick\s*\(/g) || []).length, 4,
+    'savecheck, loader, payload, and final verifier contain the intended kick handlers');
   assert.match(payloadSource, /if reason ~= "BAD HWID : \]" then return end/);
   assert.match(mainForContext, /diagnostic == "BAD HWID : \]"/);
-  assert.equal((loaderSources.match(/replicatesignal\s*\(/g) || []).length, 5,
-    'all five explicit kick handlers include the executor signal attempt');
+  assert.equal((loaderSources.match(/replicatesignal\s*\(/g) || []).length, 4,
+    'all four kick handlers include the executor signal attempt');
   assert.match(payloadSource, /if type\(replicatesignal\) == "function" then/);
   assert.match(mainForContext, /if type\(replicatesignal\) == "function" then/);
   assert.match(payloadSource, /LocalPlayer\.StatsAvailable, "Kick"/);
