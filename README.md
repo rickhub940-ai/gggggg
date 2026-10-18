@@ -1,7 +1,7 @@
 # 999MS — loader, key API และแผงควบคุม
 
 โปรเจกต์นี้คือ **ตัวล่าสุด** (`loader999mss-source-no-obf-txt`) ที่นำมาแทนของเดิมทั้งหมด
-ทุก stage ที่ส่งให้ executor เป็น Lua ที่อ่านได้ ไม่ผ่าน obfuscator
+`loadc` เป็น stage เดียวที่ obfuscate; stages 2–4 เป็น Lua อ่านได้สำหรับตรวจและแก้ไข
 
 ## โครงสร้าง
 
@@ -37,10 +37,9 @@ PORT=10000 node server.js
 | `/control` | แผงควบคุม client (ต้อง `ADMIN_TOKEN`) |
 | `/api/health` | สถานะระบบ (ไม่ต้อง auth) |
 | `/loadc.lua` | stage 1 — render จาก template ทุก request |
-| `/loada.lua/<d>/<n>` | stage 2 — ต้องมี capability อายุ 20 วิ |
-| `/loader.lua` `/payload.lua` | stage 3–4 (Lua อ่านได้) |
+| `/<token>` (stage 2–4) | ใช้ token ที่ระบบออกให้ตามลำดับ stage; stages 2–4 อ่านได้ |
 | `/api/verify` `/api/script` `/api/script-verify` `/api/heartbeat` | flow คีย์ → ticket → runtime proof |
-| `/api/control/sessions` `/api/control/command` `/api/control/bans` `/api/control/traffic` | API ของแผงควบคุม |
+| `/api/control/bans` `/api/control/events` `/api/control/traffic` `/api/link` | API ของแผงควบคุม (ต้อง `ADMIN_TOKEN`) |
 
 ## หมายเหตุ
 - `@BASE_URL@` ใน source ถูกแทนด้วย host ที่ executor เรียกเข้ามาจริง (ทำงานบน preview/โดเมนใหม่ได้)
@@ -49,18 +48,14 @@ PORT=10000 node server.js
 
 ---
 
-## สถานะปัจจุบัน (2026-10-17)
+## สถานะ production ล่าสุด (2026-10-18)
 
-ตัวนี้คือตัวที่ใช้แทน **ทุกเวอร์ชันก่อนหน้า** แล้ว (ทั้ง `whilstkey` เดิม และ gateway รุ่นเก่า)
-
-| บริการ | ที่อยู่ | เวอร์ชัน |
+| บริการ | ที่อยู่ | สถานะ |
 |---|---|---|
-| เว็บ + API | https://loader999mss.vercel.app | 3.0.0 (source-only) |
-| แผงควบคุม | https://loader999mss.vercel.app/control | — |
+| เว็บ + API | https://loader999ms.vercel.app | commit `8773472` (ไม่มี realtime/WebSocket) |
+| แผงควบคุม | https://loader999ms.vercel.app/control | HTTP only |
 
-ทดสอบหลังแทนที่: `/loadc.lua` 1803 B (Lua อ่านได้) → `/loada.lua/<cap>` 8085 B (SHA-256 ตรง pin)
-→ `/loader.lua` 20917 B → `/payload.lua` 30881 B · WS client ต่อ gateway ได้ · แผงควบคุมเห็น
-session (`sessionId`, `idleMs`) และสั่ง `notice` ถึง client ได้จริง
+การเปลี่ยน hybrid HWID ที่บันทึกไว้ในหัวข้อล่างและ source ปัจจุบันยังเป็น **working tree เท่านั้น** — ยังไม่ commit, push หรือ deploy.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -119,53 +114,34 @@ loadstring(game:HttpGet("https://example.com/<generated-link>"))(key, script)
 
 บรรทัดที่สร้างจาก `/control` จะใส่ `key = ""` ให้แก้เป็นคีย์จริง และตั้งชื่อสคริปต์ตามลิงก์ที่เลือกไว้ การแก้ source แล้วสร้าง artifacts ใหม่ให้ใช้ `node source/build.js` จากนั้นรัน `npm test`.
 
-## 2026-10-17 — marker ตรวจการเซฟซอร์สเป็นค่าสุ่มยาว
+## 2026-10-18 — save marker + next-link handoff
 
-เดิม `source/savecheck.lua` (Stage 2) ฝัง `-- supper_Boom` ไว้ 2 ที่ (บรรทัดแรก + สตริงที่ใช้สแกน)
-
-ตอนนี้เป็น token `__CHAIN_MARKER__` ที่ถูกแทนตอนเสิร์ฟด้วยค่า
-
-```
-MS9MARK_<64 hex>   ← HMAC_SHA256(secret, '999MS chain marker v1')
-```
-
-- secret = `LINK_SECRET` → `TICKET_SECRET`
-- ค่าคงที่ทุก request/instance (ไฟล์ที่เซฟไว้รอบก่อนยังถูกจับได้รอบถัดไป) แต่เดาจากสคริปต์ไม่ได้
-- Stage-1 pin sha256 ของ Stage 2 คำนวณ **หลัง** แทน marker แล้ว → hash ตรงเสมอ
-- แต่ละ stage ที่เสิร์ฟไม่มี token ค้าง (`__CHAIN_MARKER__` ถูกแทนหมด)
-
-## 2026-10-17 — marker ตรวจการเซฟซอร์ส = ค่าตายตัว (พร้อม obfuscate)
-
-เปลี่ยนจาก `-- supper_Boom` เป็น **ตัวแปรค่าตายตัว** ชื่อกลาง ๆ ที่ไม่บ่งบอกหน้าที่:
+Stage 2/3 เริ่มต้นด้วย readable marker ที่ build แล้วอยู่ byte 0:
 
 ```lua
-local MN0 = "@BASE_URL@/x/6f2c9a84d1e07b35ac84f0d97c1e6b25a8d3f904"
-...
-local marker = MN0
+local gamaramam = { "<base>/<token>" }
 ```
 
-- ไม่มีการแทนค่าตอนเสิร์ฟแล้ว (ไม่มี token `__CHAIN_MARKER__` / `MS9MARK_...` อีก)
-- ไบต์ของ Stage 2 คงที่ทุก request → เอาโค้ดไป obfuscate ได้โดยไม่กระทบ hash pin
-- เก็บ `local NEXT_LINK = ...` ไว้ **เหนือบล็อกที่จะ obfuscate** แล้ว obfuscate ส่วนที่เหลือ
-- ค่าที่สแกนหา = ตัว literal ใน `NEXT_LINK` (มี `/x/<40 hex>` ฝังอยู่ จึงไม่ซ้ำกับโค้ดอื่น)
+- token เป็น next-stage link ที่ออกใหม่ทุก run; savecheck ตรวจรูปแบบ marker และ handoff URL แต่ไม่ฝัง/เปรียบเทียบ token คงที่
+- ตรวจเฉพาะไฟล์ที่เริ่มด้วย marker นี้; ไม่ flag ไฟล์อื่นจากข้อความที่ฝังอยู่ข้างใน
+- scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
+- stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
 
-## 2026-10-17 — ยกเทคนิคจาก 3 references (hop chain / equation / HWID header / events)
+## 2026-10-18 — ผูกอุปกรณ์ด้วย HWID + fingerprint
 
-อ้างอิง: ชุดบทความ whitelist ของ shiawase, `zoolah/Luasec`, `loris1337/Roblox-Whitelist-System`
-เลือกมาเฉพาะข้อที่เข้ากับเชน Lua แบบอ่านออก (ไม่ใช้ `getrawmetatable`/`hookmetamethod`/`NfCrash`)
+อิงแนวคิดจากบทความ Shiawase, `zoolah/Luasec` และ `loris1337/Roblox-Whitelist-System` แต่เป็น protocol ของโปรเจกต์นี้เอง ไม่ได้คัดลอกโค้ดหรือจำลอง API ของแต่ละระบบแบบตรงตัว:
 
-| เทคนิค | มาจาก | อยู่ที่ |
-| --- | --- | --- |
-| hop แบบใช้ครั้งเดียว ผูกกับ `jti` ของ ticket | Luasec, loris | `lib/999MS-server-sdk.js` (`issueHop`/`consumeHop`) |
-| สมการ `A = 2x−32`, `B = 5x+256` แล้วตอบด้วย `Equate(x)` | loris (`equate`) | `/api/verify` → `/api/script` |
-| HWID ต้องมากับ header ด้วย ไม่ตรงกับ body = ปฏิเสธ | Luasec (`hwidMiddleware`) | `x-ms999-hwid` |
-| challenge RNG ที่ต้องกลับ transform ได้ | shiawase | มีอยู่แล้ว, ตอนนี้บังคับใช้ทั้ง verify และ script |
-| ตัวนับขั้น (Step) ต้องครบก่อนโหลด body | Luasec (`JumpCounter`) | `source/payload.lua` |
-| JSON decoder ของตัวเอง (เลี่ยง hook `JSONDecode`) | shiawase | `JsonDecode` / `EncodeJson` |
-| event log + แบนมีวันหมดอายุ | loris (`blacklistedFor`) | `/api/control/events` + การ์ดใน `/control` |
-| kick แบบ crash แทน `while true do end` | shiawase | มีอยู่แล้ว (`SecureCrash`) |
+- Key/device binding ตรวจผ่าน Platoboost; ไม่เพิ่ม MongoDB/Supabase หรือฐานข้อมูลคีย์ใหม่
+- Client ใช้ `gethwid()`, `get_exwid()` และ aliases (`syn.get_hwid`, `get_hwid`); ถ้า getter ใช้ไม่ได้จะหยุด ไม่ fallback ไป Roblox `GetClientId()`
+- Server ต้องได้ทั้ง explicit HWID (`x-ms999-hwid`/body) และ executor `*-fingerprint` header; ไม่มีค่าใดค่าหนึ่ง = ปฏิเสธ
+- เนื่องจาก Platoboost รับ identifier เดียว จึงสร้าง `bindingId = SHA256("999MS-device-binding-v1\\0" + canonical(HWID) + "\\0" + canonical(fingerprint))`; `lib/platoboost.js` hash `bindingId` เป็น identifier เดียวที่ส่งให้ provider และ ticket/runtime proof ใช้ hash ของ `bindingId` เดียวกัน
+- ทุก route ที่ใช้ ticket re-resolve HWID+fingerprint; `/api/verify` → `/api/script` → `/api/script-verify` ตรวจ ticket, RNG/equation proof, composite binding และ runtime proof ก่อนยอมให้ client รัน script
+- เปลี่ยน identifier นี้ทำให้ key ที่เคยผูกด้วย HWID อย่างเดียวต้อง rebind/reset ใน Platoboost ก่อน rollout; ห้าม fallback ไปใช้ HWID เดี่ยว เพราะจะทำให้ binding แบบคู่ไม่มีผล
+- ไม่ใช้ `getrawmetatable`, `hookmetamethod`, การสั่ง kick/crash, หรือการอ้างว่า client identity เป็น hardware attestation
 
-ลำดับطلب: `/api/verify` (ได้ `hop`, `A`, `B`) → `/api/script` (เผา hop, ตรวจสมการ, คืน `hop` ใหม่ในซองเข้ารหัส) → `/api/script-verify` (เผา hop ใบที่สอง)
+แหล่งอ้างอิง: [Shiawase whitelist series](https://shiawase.dev/blog/rblx-auth1), [Luasec](https://github.com/zoolah/Luasec), [Roblox-Whitelist-System](https://github.com/loris1337/Roblox-Whitelist-System). Luasec และ Loris repo ไม่พบ license ที่ระบุสิทธิ์นำโค้ดมาใช้ จึงใช้เป็นข้อมูลศึกษา ไม่คัดลอก implementation; repository Shiawase ระบุ MIT.
+
+**ข้อจำกัด:** fingerprint จาก executor เป็นข้อมูลที่ client ควบคุมหรือปลอมได้ และ client Lua ถูกอ่าน/แก้ไขได้ จึงไม่มีวิธีรับประกัน “100%” ด้วยการตรวจฝั่ง client เพียงอย่างเดียว. `lib/999MS-server-sdk.js` เก็บ hop/replay state ใน memory ของ instance; การกระจายคำขอข้าม Vercel instances อาจกระทบการตรวจแบบ one-time จึงไม่ควรถือว่าเป็น shared durable store.
 
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด

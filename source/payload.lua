@@ -106,26 +106,22 @@ local function Split(str, sep)
 end
 
 local function GetHWID()
-    -- Executors expose this API under different names and may wrap it in Lua.
-    -- Accept any callable candidate that returns a plausible string; the server
-    -- still binds and verifies the returned value for the session.
+    -- Match Luasec's primary getter order, then accept common executor aliases.
+    -- A getter must be present; do not substitute an executor fingerprint header
+    -- or Roblox's ClientId for this client-supplied device identifier.
     local fs = {}
-    if type(syn) == "table" and type(syn.get_hwid) == "function" then
-        fs[#fs + 1] = syn.get_hwid
+    local function add(fn)
+        if type(fn) == "function" then fs[#fs + 1] = fn end
     end
-    if type(get_hwid) == "function" then fs[#fs + 1] = get_hwid end
-    if type(gethwid) == "function" then fs[#fs + 1] = gethwid end
+    add(gethwid)
+    add(get_exwid)
+    if type(syn) == "table" then add(syn.get_hwid) end
+    add(get_hwid)
     for _, fn in ipairs(fs) do
         local ok, value = pcall(fn)
         if ok and type(value) == "string" and #value >= 4 and #value <= 512 then
             return value
         end
-    end
-    local ok, value = pcall(function()
-        return game:GetService("RbxAnalyticsService"):GetClientId()
-    end)
-    if ok and type(value) == "string" and #value >= 16 and #value <= 512 then
-        return value
     end
     return nil
 end
@@ -302,11 +298,12 @@ end
 
 -- ═══ POST ═══
 local function postJSON(path, payload, hwid)
-    -- Reuse the exact native device value from this login for every request.
+    -- Reuse the exact value returned by the executor getter on all requests.
     if type(hwid) ~= "string" or #hwid < 4 or #hwid > 512 then
-        return nil, "Trusted executor device ID unavailable"
+        return nil, "Executor HWID getter unavailable"
     end
-    local headers = { ["Content-Type"] = "application/json", ["x-ms999-hwid"] = hwid }
+    local headers = { ["Content-Type"] = "application/json" }
+    if type(hwid) == "string" then headers["x-ms999-hwid"] = hwid end
     local ok, res = pcall(HttpRequest, {
         Url = BASE_URL .. path,
         Method = "POST",
@@ -388,9 +385,6 @@ local function FetchAndLoad(key, sname)
         return nil, "Chain expired"
     end
     local hwid = GetHWID()
-    if type(hwid) ~= "string" then
-        return nil, "Trusted executor device ID unavailable"
-    end
     local player = Players.LocalPlayer
     if not player then return nil, "Player context unavailable" end
     local userId = tostring(player.UserId)
@@ -687,10 +681,6 @@ local function MakeUI()
     buyBtn.MouseButton1Click:Connect(function()
         task.spawn(function()
             local hwid = GetHWID()
-            if type(hwid) ~= "string" then
-                setStatus("Trusted executor device ID unavailable")
-                return
-            end
             local r, err = postJSON("/api/start", { hwid = hwid }, hwid)
             if not ChecksActive then return end
             if not r then setStatus(err or "Cannot open link"); return end

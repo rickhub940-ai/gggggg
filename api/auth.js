@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { verifyKey, createLink } = require('../lib/platoboost');
+const { resolveHwid, deviceBindingId } = require('../lib/hwid');
 const { issueTicket, verifyTicket, hashHwid } = require('../lib/ticket');
 const link = require('../lib/link');
 const chainLinks = require('../lib/chainlink');
@@ -190,33 +191,28 @@ function noteEvent(kind, detail) {
   if (securityEvents.length > EVENTS_MAX) securityEvents.splice(0, securityEvents.length - EVENTS_MAX);
 }
 
-// The HWID travels in a header as well as the body (the pattern used by
-// established whitelists). Body and header must agree; a mismatch means the
-// request was rewritten in flight.
+// Require both the explicit client getter (`gethwid()` / `get_exwid()`) and an
+// executor-provided fingerprint header. Neither is hardware attestation alone;
+// the pair is combined before Platoboost sees its single identifier field.
 function hwidFromRequest(req, bodyValue) {
-  const header = req.headers['x-ms999-hwid'];
-  const fromHeader = typeof header === 'string' ? header.trim() : '';
-  const fromBody = typeof bodyValue === 'string' ? bodyValue.trim() : '';
-  if (fromHeader && fromBody && fromHeader !== fromBody) {
-    noteEvent('hwid_spoof', 'header and body disagree');
-    return { ok: false, reason: 'hwid mismatch' };
+  const result = resolveHwid(req.headers || {}, bodyValue);
+  if (!result.ok && result.reason === 'hwid mismatch') {
+    noteEvent('hwid_spoof', 'explicit header and body disagree');
   }
-  const value = fromHeader || fromBody;
-  if (value.length < 4 || value.length > 512) return { ok: false, reason: 'invalid hwid format' };
-  return { ok: true, hwid: value };
+  return result;
 }
 
-// A ticket is bound to the device that earned it. Every step after /api/verify
-// re-checks the device, so a copied ticket is worthless on another machine.
-function deviceMatches(req, hwidHash) {
-  const device = hwidFromRequest(req);
+// A ticket is bound to the pair of device signals that earned it. Every step
+// re-resolves both signals, so changing either invalidates the ticket.
+function deviceMatches(req, hwidHash, bodyValue) {
+  const device = hwidFromRequest(req, bodyValue);
   if (!device.ok) return { ok: false, reason: device.reason };
   if (typeof hwidHash !== 'string' || !hwidHash) return { ok: false, reason: 'ticket has no device' };
-  if (hashHwid(device.hwid) !== hwidHash) {
-    noteEvent('device_reject', 'ticket used from another device');
+  if (hashHwid(device.bindingId) !== hwidHash) {
+    noteEvent('device_reject', 'ticket used with a different HWID/fingerprint pair');
     return { ok: false, reason: 'device mismatch' };
   }
-  return { ok: true };
+  return { ok: true, ...device };
 }
 
 // ═══ /api/link (admin) ═══
@@ -587,6 +583,7 @@ async function handleVerify(req, res, ip) {
     return res.status(400).json({ valid: false, error: hwidCheck.reason });
   }
   const clientHwid = hwidCheck.hwid;
+  const bindingId = hwidCheck.bindingId;
   if (typeof scriptName !== 'string' || scriptName.length < 1 || scriptName.length > 64)
     return res.status(400).json({ valid: false, error: 'scriptName required' });
   if (!isValidScriptName(scriptName))
@@ -600,7 +597,7 @@ async function handleVerify(req, res, ip) {
     return res.status(403).json({ valid: false, message: 'Banned: ' + reason });
   }
 
-  const result = await verifyKey(key, clientHwid);
+  const result = await verifyKey(key, bindingId);
   if (!result.valid) {
     return res.status(result.rateLimited ? 429 : 200).json({
       valid: false,
@@ -609,7 +606,8 @@ async function handleVerify(req, res, ip) {
   }
 
   const ticket = issueTicket({
-    hwidHash: hashHwid(clientHwid),
+    // Reuse the composite HWID+fingerprint digest for tickets and runtime proof.
+    hwidHash: hashHwid(bindingId),
     scope: 'script',
     userId: userId || null,
     scriptName,
@@ -772,28 +770,38 @@ async function handleScriptVerify(req, res) {
 
   const payload = verifyTicket(ticket);
   if (!payload) return rejectRuntimeVerification(res, 401, 'D2_TICKET_INVALID');
-
-  if (!consumeHop(hop, payload.jti)) {
-    noteEvent('runtime_reject', 'missing or replayed hop');
-    return rejectRuntimeVerification(res, 409, 'D2_HOP_MISSING');
-  }
   if (payload.scope !== 'script') return rejectRuntimeVerification(res, 403, 'D2_TICKET_SCOPE');
 
-  const banReason = checkRevoked({ userId: payload.userId });
+  // Resolve HWID before burning the next-step hop so a missing executor
+  // fingerprint does not make a retried legitimate request look replayed.
+  const device = deviceMatches(req, payload.hwidHash, hwid);
+  if (!device.ok) {
+    const categories = {
+      'invalid hwid format': 'D2_HWID_FORMAT',
+      'fingerprint required': 'D2_FINGERPRINT_MISSING',
+      'hwid mismatch': 'D2_HWID_MISMATCH',
+      'device mismatch': 'D2_DEVICE_BINDING_MISMATCH',
+    };
+    return rejectRuntimeVerification(res, 403, categories[device.reason] || 'D2_DEVICE_INVALID');
+  }
+  const clientHwid = device.hwid;
+
+  const banReason = checkRevoked({ hwid: clientHwid, userId: payload.userId });
   if (banReason) return rejectRuntimeVerification(res, 403, 'D2_REVOKED');
 
   if (typeof runtimeSecret !== 'string' || runtimeSecret.length !== 64) {
     return rejectRuntimeVerification(res, 403, 'D2_SECRET_FORMAT');
   }
-  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512) {
-    return rejectRuntimeVerification(res, 403, 'D2_HWID_FORMAT');
+  if (!consumeHop(hop, payload.jti)) {
+    noteEvent('runtime_reject', 'missing or replayed hop');
+    return rejectRuntimeVerification(res, 409, 'D2_HOP_MISSING');
   }
 
   const proofFailure = verifyRuntimeProof({
     ticketPayload: payload,
     runtimeSecret,
     scriptToken,
-    hwidHash: hashHwid(hwid),
+    hwidHash: hashHwid(device.bindingId),
     scriptName,
     runtimeTtl: RUNTIME_TTL,
   });
@@ -880,34 +888,32 @@ async function handleHeartbeat(req, res, ip) {
   }, xorKey));
 }
 
-function verifiedScriptContext(ticket, hwid, scriptName, ip) {
+function verifiedScriptContext(ticket, hwid, fingerprint, scriptName, ip) {
   if (typeof ticket !== 'string' || ticket.length > 4096) return { error: 'ticket required', status: 400 };
   if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512) return { error: 'invalid hwid format', status: 400 };
+  if (typeof fingerprint !== 'string' || fingerprint.length < 4 || fingerprint.length > 512) return { error: 'fingerprint required', status: 400 };
   const payload = verifyTicket(ticket);
   if (!payload || payload.scope !== 'script') return { error: 'invalid ticket', status: 401 };
-  if (!timingSafeStringEquals(payload.hwidHash, hashHwid(hwid))) return { error: 'hwid mismatch', status: 403 };
+  const bindingId = deviceBindingId(hwid, fingerprint);
+  if (!timingSafeStringEquals(payload.hwidHash, hashHwid(bindingId))) return { error: 'device mismatch', status: 403 };
   const name = typeof scriptName === 'string' && scriptName.length ? scriptName : payload.scriptName;
   if (!isValidScriptName(name) || name !== payload.scriptName) return { error: 'scriptName mismatch', status: 403 };
   const reason = checkRevoked({ hwid, userId: payload.userId, ip });
   if (reason) return { error: 'Banned: ' + reason, status: 403 };
-  return { payload, name, hwidHash: hashHwid(hwid) };
+  return { payload, name, hwidHash: hashHwid(bindingId) };
 }
 
 async function handleStart(req, res, ip) {
   const { hwid } = req.body || {};
+  const device = hwidFromRequest(req, hwid);
+  if (!device.ok) return res.status(400).json({ error: device.reason });
 
-  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512)
-    return res.status(400).json({ error: 'invalid hwid' });
-
-  if (!checkRateLimit(ip))
-    return res.status(429).json({ error: 'Rate limited' });
-
-  const reason = checkRevoked({ hwid, ip });
+  const reason = checkRevoked({ hwid: device.hwid, ip });
   if (reason)
     return res.status(403).json({ error: 'Banned: ' + reason });
 
   try {
-    const result = await createLink(hwid);
+    const result = await createLink(device.bindingId);
     return res.status(result.rateLimited ? 429 : 200).json(result);
   } catch (err) {
     console.error('[start]', err.message);

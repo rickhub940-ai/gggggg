@@ -51,17 +51,19 @@ end
 
 local HWID = H
 if type(HWID) ~= "string" or #HWID < 4 or #HWID > 512 then
-    return Abort("[999MS] Device context invalid")
+    return Abort("[999MS] Executor HWID getter unavailable")
 end
 
 local req = I
 if type(req) ~= "function" then return Abort("[999MS] HTTP not supported") end
 local BASE_URL = "https://loader999mss.vercel.app"
+local headers = { ["Content-Type"] = "application/json" }
+if type(HWID) == "string" then headers["x-ms999-hwid"] = HWID end
 
 local ok, res = pcall(req, {
     Url = BASE_URL .. "/api/script-verify",
     Method = "POST",
-    Headers = { ["Content-Type"] = "application/json", ["x-ms999-hwid"] = HWID },
+    Headers = headers,
     Body = HttpService:JSONEncode({
         ticket = Ticket,
         hwid = HWID,

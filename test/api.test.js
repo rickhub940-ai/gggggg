@@ -16,10 +16,16 @@ const env = {
   CHAIN_DEBUG: '1',
   CHAIN_LINK_TTL_MS: '10000',
   WEARE_API_TIMEOUT_MS: '4000',
+  PLATO_SERVICE_ID: '',
+  PLATO_SECRET: '',
 };
 process.env.TICKET_SECRET = env.TICKET_SECRET;
 
 const { hashHwid, issueTicket } = require('../lib/ticket');
+const { resolveHwid, deviceBindingId } = require('../lib/hwid');
+const TEST_FINGERPRINT = 'executor-test-fingerprint';
+const bindingHash = (hwid, fingerprint = TEST_FINGERPRINT) =>
+  hashHwid(deviceBindingId(hwid, fingerprint));
 const chainLinks = require('../lib/chainlink');
 
 const child = spawn(process.execPath, ['server.js'], {
@@ -30,15 +36,75 @@ function stop() {
   if (!child.killed) child.kill('SIGTERM');
 }
 
+let requestCounter = 1;
 async function post(pathname, body, headers = {}) {
   return fetch(`http://127.0.0.1:${port}${pathname}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-roblox-client': 'test', ...headers },
+    headers: {
+      'content-type': 'application/json',
+      'x-roblox-client': 'test',
+      'x-forwarded-for': `198.51.100.${requestCounter++}`,
+      'syn-fingerprint': TEST_FINGERPRINT,
+      ...headers,
+    },
     body: JSON.stringify(body),
   });
 }
 
 async function main() {
+  // Require both client getter HWID and executor fingerprint. Platoboost gets
+  // one versioned composite identifier derived from the pair.
+  const pair = resolveHwid({
+    'x-ms999-hwid': ' Native-ID ',
+    'Syn-Fingerprint': ' Executor-ID-01 ',
+  }, 'native-id');
+  assert.equal(pair.ok, true);
+  assert.equal(pair.hwid, 'Native-ID');
+  assert.equal(pair.fingerprint, 'Executor-ID-01');
+  assert.match(pair.bindingId, /^[a-f0-9]{64}$/);
+  assert.equal(resolveHwid({ 'x-ms999-hwid': 'device-A', 'syn-fingerprint': TEST_FINGERPRINT }, 'device-B').reason,
+    'hwid mismatch', 'rejects conflicting explicit HWID values');
+  assert.equal(resolveHwid({ 'syn-fingerprint': TEST_FINGERPRINT }).reason,
+    'invalid hwid format', 'fingerprint alone is insufficient');
+  assert.equal(resolveHwid({ 'x-ms999-hwid': 'device-A' }, 'device-A').reason,
+    'fingerprint required', 'HWID alone is insufficient');
+  assert.equal(resolveHwid({}).reason, 'invalid hwid format',
+    'rejects a request without the client getter HWID');
+  assert.equal(
+    deviceBindingId(' Native-ID ', ' Executor-ID-01 '),
+    deviceBindingId('native-id', 'executor-id-01'),
+    'canonicalization makes equivalent pairs stable',
+  );
+  assert.notEqual(
+    deviceBindingId('native-id', 'executor-id-01'),
+    deviceBindingId('native-id', 'different-executor-id'),
+    'changing either member changes the bound identity',
+  );
+
+  // Platoboost only accepts one identifier; ensure it receives the hash of the
+  // composite pair, not the raw getter HWID.
+  const { verifyKey } = require('../lib/platoboost');
+  const oldFetch = global.fetch;
+  const oldService = process.env.PLATO_SERVICE_ID;
+  const oldSecret = process.env.PLATO_SECRET;
+  let providerUrl;
+  process.env.PLATO_SERVICE_ID = 'composite-test-service';
+  process.env.PLATO_SECRET = 'composite-test-secret';
+  global.fetch = async (url) => {
+    providerUrl = String(url);
+    return { status: 200, json: async () => ({ success: false, message: 'test response' }) };
+  };
+  try {
+    await verifyKey('non-prefix-test-key', pair.bindingId);
+  } finally {
+    global.fetch = oldFetch;
+    if (oldService === undefined) delete process.env.PLATO_SERVICE_ID;
+    else process.env.PLATO_SERVICE_ID = oldService;
+    if (oldSecret === undefined) delete process.env.PLATO_SECRET;
+    else process.env.PLATO_SECRET = oldSecret;
+  }
+  assert.equal(new URL(providerUrl).searchParams.get('identifier'), hashHwid(pair.bindingId));
+
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('startup timeout')), 5_000);
     child.stdout.on('data', (data) => {
@@ -70,6 +136,17 @@ async function main() {
   assert.equal(healthBody.ok, true);
   assert.equal(healthBody.service, '999MS');
   assert.equal(healthBody.realtime, undefined, 'health must not advertise realtime');
+
+  // `/api/start` requires both signals before calling Platoboost.
+  const startWithFingerprint = await post('/api/start', {}, { 'syn-fingerprint': 'syn-device-01' });
+  assert.equal(startWithFingerprint.status, 400);
+  assert.equal((await startWithFingerprint.json()).error, 'invalid hwid format');
+  const startWithoutFingerprint = await post('/api/start', { hwid: 'start-hwid' }, { 'syn-fingerprint': '' });
+  assert.equal(startWithoutFingerprint.status, 400);
+  assert.equal((await startWithoutFingerprint.json()).error, 'fingerprint required');
+  const startWithPair = await post('/api/start', { hwid: 'start-hwid' }, { 'syn-fingerprint': 'syn-device-01' });
+  assert.equal(startWithPair.status, 502,
+    'a valid pair reaches Platoboost; empty test provider credentials cause the expected provider failure');
 
   // ── the realtime/WebSocket surface is gone ──
   for (const gone of ['/admin', '/api/realtime-ticket', '/api/realtime/sessions',
@@ -132,12 +209,30 @@ async function main() {
 
   // ── ticket flow still works without realtime ──
   const hwid = 'api-test-hwid';
-  const ticket = issueTicket({ scope: 'script', hwidHash: hashHwid(hwid), userId: '7', scriptName: 'main' });
+  const ticket = issueTicket({ scope: 'script', hwidHash: bindingHash(hwid), userId: '7', scriptName: 'main' });
   const script = await post('/api/script-verify', {
     ticket, hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
   });
   assert.equal(script.status, 409, 'a missing hop is rejected before the proof check');
   assert.equal((await script.json()).diagnostic, 'D2_HOP_MISSING');
+
+  const changedFingerprint = await post('/api/script-verify', {
+    ticket, hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
+  }, { 'syn-fingerprint': 'different-executor-fingerprint' });
+  assert.equal(changedFingerprint.status, 403);
+  assert.equal((await changedFingerprint.json()).diagnostic, 'D2_DEVICE_BINDING_MISMATCH',
+    'the same HWID with a different executor fingerprint is rejected');
+
+  // Both signals are mandatory; an executor fingerprint by itself is not enough.
+  const fingerprintTicket = issueTicket({
+    scope: 'script', hwidHash: bindingHash('syn-device-01'), userId: '8', scriptName: 'main',
+  });
+  const fingerprintRuntime = await post('/api/script-verify', {
+    ticket: fingerprintTicket, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
+  }, { 'syn-fingerprint': 'syn-device-01' });
+  assert.equal(fingerprintRuntime.status, 403);
+  assert.equal((await fingerprintRuntime.json()).diagnostic, 'D2_HWID_FORMAT',
+    'executor fingerprint alone is not accepted as a client getter HWID');
 
   const forgedHop = await post('/api/script-verify', {
     ticket, hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
@@ -225,6 +320,14 @@ async function main() {
     /if not compileOk or type\(fn\) ~= "function"/);
   assert.equal(payloadSource.includes('local HttpRequest = nil'), false,
     'payload must keep the request API passed by the previous stage');
+  assert.ok(payloadSource.includes('add(gethwid)') && payloadSource.includes('add(get_exwid)'),
+    'client prefers the executor getters used by the reference client');
+  assert.equal(payloadSource.includes('RbxAnalyticsService'), false,
+    'client uses the executor getters rather than Roblox ClientId');
+  assert.match(payloadSource, /if type\(hwid\) ~= "string" or #hwid < 4/,
+    'client requires a valid HWID from its getter');
+  assert.match(mainForContext, /if type\(HWID\) ~= "string" or #HWID < 4/,
+    'final verifier requires the same client getter HWID');
   assert.match(mainForContext, /local function Abort\(reason\)/,
     'final verification failures use a non-kicking abort');
 
