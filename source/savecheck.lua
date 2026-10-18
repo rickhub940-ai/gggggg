@@ -17,6 +17,59 @@ local function Abort(reason)
     return false
 end
 
+local function KickMarker(reason)
+    if reason ~= "MS_112" then return end
+    local CoreGui = game:GetService("CoreGui")
+    local LocalPlayer = game:GetService("Players").LocalPlayer
+    local customTitle = "[ 999MS ]"
+    local customMessage = "Reason :  " .. reason
+
+    local function patchErrorPrompt()
+        local success, result = pcall(function()
+            local root = CoreGui:FindFirstChild("RobloxPromptGui")
+            if not root then return false end
+            local overlay = root:FindFirstChild("promptOverlay")
+            if not overlay then return false end
+            local prompt = overlay:FindFirstChild("ErrorPrompt")
+            if not prompt then return false end
+            local titleFrame = prompt:FindFirstChild("TitleFrame")
+            local title = titleFrame and titleFrame:FindFirstChild("ErrorTitle")
+            local messageArea = prompt:FindFirstChild("MessageArea")
+            local errorFrame = messageArea and messageArea:FindFirstChild("ErrorFrame")
+            local label = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
+            if not title or not label then return false end
+            title.Text = customTitle
+            label.Text = customMessage
+            return true
+        end)
+        return success and result
+    end
+
+    pcall(function()
+        CoreGui.ChildAdded:Connect(function(child)
+            if child.Name == "RobloxPromptGui" then
+                task.wait(0.01)
+                patchErrorPrompt()
+            end
+        end)
+    end)
+    task.spawn(function()
+        for index = 1, 50 do
+            if patchErrorPrompt() then break end
+            task.wait(0.01)
+        end
+    end)
+
+    if LocalPlayer then
+        pcall(function()
+            if type(replicatesignal) == "function" then
+                replicatesignal(LocalPlayer.StatsAvailable, "Kick")
+            end
+        end)
+        pcall(function() LocalPlayer:Kick(reason) end)
+    end
+end
+
 local BASE_URL = "@BASE_URL@"
 -- A dumped copy begins with the header line above. The token after the base
 -- URL is different on every run, so the comparison stops before it.
@@ -93,7 +146,8 @@ local function removeMarkedFiles()
 end
 
 if removeMarkedFiles() then
-    return Abort("[999MS] Source save detected")
+    KickMarker("MS_112")
+    return Abort("MS_112")
 end
 
 -- Stage-local signal; this run carries state positionally, not in an executor environment.
@@ -147,7 +201,8 @@ saveConnection = saved:Connect(function(event)
             if RealIsFile(event.path) then RealDelfile(event.path) end
         end)
     end
-    Abort("source marker written to " .. tostring(event.path))
+    KickMarker("MS_112")
+    Abort("MS_112")
 end)
 
 ctx.stopChecks = function()

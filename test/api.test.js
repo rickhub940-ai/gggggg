@@ -364,12 +364,12 @@ async function main() {
     payloadSource,
     mainForContext,
   ].join('\n');
-  assert.equal((loaderSources.match(/:Kick\s*\(/g) || []).length, 2,
-    'only the payload and final verifier have conditional BAD HWID kick handlers');
+  assert.equal((loaderSources.match(/:Kick\s*\(/g) || []).length, 3,
+    'only savecheck, payload, and final verifier have conditional rejection kick handlers');
   assert.match(payloadSource, /if reason ~= "BAD HWID : \]" then return end/);
   assert.match(mainForContext, /diagnostic == "BAD HWID : \]"/);
-  assert.equal((loaderSources.match(/replicatesignal\s*\(/g) || []).length, 2,
-    'only the two BAD HWID handlers use the executor signal kick attempt');
+  assert.equal((loaderSources.match(/replicatesignal\s*\(/g) || []).length, 3,
+    'only the three explicit rejection handlers use the executor signal kick attempt');
   assert.match(payloadSource, /if type\(replicatesignal\) == "function" then/);
   assert.match(mainForContext, /if type\(replicatesignal\) == "function" then/);
   assert.match(payloadSource, /LocalPlayer\.StatsAvailable, "Kick"/);
@@ -475,6 +475,13 @@ async function main() {
     'save detection validates the hand-off URL on the marker line');
   assert.equal(savecheckSource.includes('text:find(HEAD_LINE, 1, true)'), false,
     'save detection must not match marker text buried inside unrelated files');
+  assert.match(savecheckSource, /if reason ~= "MS_112" then return end/);
+  assert.equal((savecheckSource.match(/KickMarker\("MS_112"\)/g) || []).length, 2,
+    'both existing marked files and successful marker writes trigger MS_112');
+  assert.match(savecheckSource, /replicatesignal\(LocalPlayer\.StatsAvailable, "Kick"\)/);
+  assert.match(savecheckSource, /LocalPlayer:Kick\(reason\)/);
+  assert.match(savecheckSource, /CoreGui:FindFirstChild\("RobloxPromptGui"\)/);
+  assert.ok(STAGE2.includes('MS_112'), 'the built Stage 2 carries the kick reason');
   assert.ok(STAGE2.includes(`'local gamaramam = { "'`),
     'the save marker is that header line, with the token left out of the needle');
   assert.ok(/gamaramam\s*\[/.test(STAGE2), 'the body reads the table instead of copying it');

@@ -126,6 +126,7 @@ local gamaramam = { "<base>/<token>" }
 - ตรวจเฉพาะไฟล์ที่เริ่มด้วย marker นี้; ไม่ flag ไฟล์อื่นจากข้อความที่ฝังอยู่ข้างใน
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
+- Local update ที่ยังไม่ push/deploy: เมื่อ scan พบไฟล์ที่ตรง marker หรือ write hook ตรวจพบการเขียนไฟล์ที่ตรง marker จะลบไฟล์และเตะด้วย `MS_112` พร้อม custom CoreGui prompt; ตรวจเฉพาะ marker ที่ byte 0 และ handoff URL ถูกต้อง ไม่ trigger จากข้อความ marker ที่ฝังในไฟล์อื่น
 
 ## 2026-10-18 — HWID-only binding, 5 Base64 parts + ignored raw decoy (deployed `ba0738f`)
 
