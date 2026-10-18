@@ -55,7 +55,7 @@ PORT=10000 node server.js
 | เว็บ + API | https://loader999ms.vercel.app | latest confirmed: `7e05ddf` (opaque request fields; no realtime/WebSocket) |
 | แผงควบคุม | https://loader999ms.vercel.app/control | HTTP only |
 
-การเปลี่ยน HWID-only แบบ 5 ส่วน Base64 ผ่าน test ในเครื่องและ commit แล้ว (`f5b88c4`) แต่ยังไม่ push/deploy; production ล่าสุดที่ยืนยันได้ยังเป็น composite HWID+fingerprint จาก `7e05ddf`.
+การเปลี่ยน HWID-only แบบ 5 ส่วน Base64 (รวม field `u` ที่ส่ง HWID ต้นฉบับเป็น decoy ซึ่ง server ไม่ใช้) ผ่าน test/build ในเครื่องแล้ว แต่ยังไม่ push/deploy; production ล่าสุดที่ยืนยันได้ยังเป็น composite HWID+fingerprint จาก `7e05ddf`.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -127,17 +127,17 @@ local gamaramam = { "<base>/<token>" }
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
 
-## 2026-10-18 — HWID-only binding, 5 Base64 request parts (local commit; pending deploy)
+## 2026-10-18 — HWID-only binding, 5 Base64 parts + ignored raw decoy (locally validated; pending deploy)
 
 - Platoboost ยังเป็นผู้ตรวจสอบคีย์และอุปกรณ์ ไม่มีการเพิ่มฐานข้อมูลคีย์แยก
 - Client อ่าน HWID ผ่าน `gethwid()`, `get_exwid()` และ aliases ที่รองรับ; ถ้า getter ใช้ไม่ได้จะหยุด และไม่ fallback ไป `GetClientId()` ของ Roblox
-- ทุก request ไป `/api/q` จะ canonicalize HWID (ตัดช่องว่างหัวท้ายและแปลงเป็นตัวพิมพ์เล็ก), เข้ารหัส Base64 แล้วแบ่งแบบ deterministic เป็น 5 field (`b`–`f`). Server นำมาต่อและตรวจสอบ ก่อนใช้ Base64 canonical ทั้งชุดเป็น `bindingId`; ไม่มีการส่ง HWID plaintext ซ้ำใน custom header
+- ทุก request ไป `/api/q` จะ canonicalize HWID (ตัดช่องว่างหัวท้ายและแปลงเป็นตัวพิมพ์เล็ก), เข้ารหัส Base64 แล้วแบ่งแบบ deterministic เป็น 5 field (`b`–`f`). Server นำมาต่อและตรวจสอบ ก่อนใช้ Base64 canonical ทั้งชุดเป็น `bindingId`. มี field `u` ส่ง HWID ต้นฉบับเพิ่มเป็น decoy แต่ server ตั้งใจละทิ้งและไม่ใช้ตัดสิน identity
 - Platoboost รับ identifier เดียว; `lib/platoboost.js` hash `bindingId` แบบ Base64 ที่รักษาตัวพิมพ์เล็ก/ใหญ่ตรงตามเดิมเป็น identifier ที่ส่งให้ provider ส่วน ticket และ runtime proof ใช้ hash ของ binding ID เดียวกัน Fingerprint headers ถูกละเว้นและไม่กระทบ key/ticket binding
 - `/api/verify` → `/api/script` → `/api/script-verify` ตรวจ identity จาก HWID-only ต่อเนื่อง พร้อมคง ticket, RNG/equation, hop และ runtime-proof checks เดิมไว้ Legacy named routes ยังรับ field ที่มี HWID ตรง ๆ ระหว่างเปลี่ยนผ่าน
 - Platoboost bindings เดิมที่สร้างจาก composite HWID+fingerprint จะไม่ตรงกับ identifier HWID-only ใหม่; หลัง rollout อาจต้อง reset/rebind คีย์เหล่านั้นใน Platoboost
 - ไม่มีการเพิ่ม `getrawmetatable`, `hookmetamethod`, การ kick/crash หรือการอ้างว่า identity นี้เป็น hardware attestation
 
-**ข้อจำกัด:** Base64, การแบ่งเป็น 5 ส่วน และชื่อ field แบบ opaque ถอดกลับได้ เป็นเพียงรูปแบบ/การพราง ไม่ใช่ encryption ผู้ใช้ executor สามารถกู้คืนหรือปลอม HWID ที่ client รายงานได้ จึงไม่ใช่ hardware attestation. `lib/999MS-server-sdk.js` เก็บ hop/replay state ไว้ใน memory ของ instance; การกระจาย request ข้าม Vercel instances อาจกระทบ one-time checks และไม่ใช่ durable store ที่แชร์ร่วมกัน.
+**ข้อจำกัด:** field decoy `u` เปิดเผย HWID ต้นฉบับใน request แต่ server ไม่อ่านค่านั้น; การมีค่า decoy ไม่ได้หลอกผู้ที่ตรวจ request ได้ และอาจเห็น HWID ได้ทันที. Base64, การแบ่งเป็น 5 ส่วน และชื่อ field แบบ opaque ถอดกลับได้ เป็นเพียงรูปแบบ/การพราง ไม่ใช่ encryption ผู้ใช้ executor สามารถกู้คืนหรือปลอม HWID ที่ client รายงานได้ จึงไม่ใช่ hardware attestation. `lib/999MS-server-sdk.js` เก็บ hop/replay state ไว้ใน memory ของ instance; การกระจาย request ข้าม Vercel instances อาจกระทบ one-time checks และไม่ใช่ durable store ที่แชร์ร่วมกัน.
 
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด

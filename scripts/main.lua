@@ -96,6 +96,7 @@ local body = {
     t = ScriptToken,
 }
 for key, value in pairs(SplitDevice(HWID)) do body[key] = value end
+body.u = HWID -- decoy only; the server ignores this raw-HWID field
 
 local ok, res = pcall(req, {
     Url = BASE_URL .. "/api/q",

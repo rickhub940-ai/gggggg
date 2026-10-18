@@ -198,6 +198,8 @@ function decodeDeviceParts(body = {}) {
 }
 
 function decodeOpaqueRequest(action, body = {}) {
+  // body.u may carry the client's raw-HWID decoy; deliberately ignore it.
+  // Only the validated five-part Base64 representation determines identity.
   const hwid = decodeDeviceParts(body);
   switch (action) {
     case 'verify':

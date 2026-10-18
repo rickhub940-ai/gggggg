@@ -336,12 +336,14 @@ local function PackRequest(path, payload, hwid)
     else
         return nil
     end
+    -- `u` carries the raw getter value as a decoy; the server ignores it.
+    out.u = hwid
     return out
 end
 
 local function postJSON(path, payload, hwid)
-    -- Reuse the same HWID; only its canonical Base64 form is sent, split into
-    -- five deterministic request fields. No plaintext HWID header is emitted.
+    -- Reuse the same getter value. Its canonical Base64 form is split into
+    -- five identity fields; PackRequest also adds raw `u` as an ignored decoy.
     if type(hwid) ~= "string" or #hwid < 4 or #hwid > 512 then
         return nil, "Executor HWID getter unavailable"
     end

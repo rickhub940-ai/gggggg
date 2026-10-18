@@ -217,7 +217,7 @@ async function main() {
   assert.equal((await forgedVerify.json()).error, 'RNG integers rejected');
 
   const opaqueVerify = await post('/api/q', {
-    p: 'q7', a: 'KEY_TEST', ...deviceParts('api-test-hwid'),
+    p: 'q7', a: 'KEY_TEST', ...deviceParts('api-test-hwid'), u: 'a-different-raw-hwid',
     g: 'main', h: '7', i: 1.5, j: 1, k: 1, l: 1, m: 1, n: 2,
   });
   assert.equal(opaqueVerify.status, 400);
@@ -228,14 +228,15 @@ async function main() {
   const hwid = 'api-test-hwid';
   const ticket = issueTicket({ scope: 'script', hwidHash: bindingHash(hwid), userId: '7', scriptName: 'main' });
   const opaqueScript = await post('/api/q', {
-    p: 'm2', a: ticket, ...deviceParts(hwid), g: 'main', o: [], q: '', r: 1,
+    p: 'm2', a: ticket, ...deviceParts(hwid), u: 'not-the-ticket-hwid',
+    g: 'main', o: [], q: '', r: 1,
   });
   assert.equal(opaqueScript.status, 409);
   assert.equal((await opaqueScript.json()).reason, 'hop required',
     'opaque script action reassembles and checks the HWID parts');
 
   const script = await post('/api/q', {
-    p: 'x9', a: ticket, ...deviceParts(hwid), g: 'main', q: '',
+    p: 'x9', a: ticket, ...deviceParts(hwid), u: 'not-the-ticket-hwid', g: 'main', q: '',
     s: 'y'.repeat(64), t: 'x',
   }, { 'syn-fingerprint': 'different-executor-fingerprint' });
   assert.equal(script.status, 409, 'a missing hop is rejected before the proof check');
@@ -345,6 +346,7 @@ async function main() {
   assert.match(mainForContext, /if type\(HWID\) ~= "string" or #HWID < 4/,
     'final verifier requires the same client getter HWID');
   assert.match(payloadSource, /local function AddDeviceParts\(out, hwid\)/);
+  assert.match(payloadSource, /out\.u = hwid/);
   assert.match(payloadSource, /out\.p, out\.a = "q7", payload\.key/);
   assert.match(payloadSource, /out\.i, out\.j, out\.k = payload\.Rng1, payload\.Rng2, payload\.Rng3/);
   assert.match(payloadSource, /out\.l, out\.m, out\.n = payload\.Rng4, payload\.Rng5, payload\.RngFloat/);
@@ -355,7 +357,8 @@ async function main() {
   assert.match(mainForContext, /Url = BASE_URL \.\. "\/api\/q"/);
   assert.match(mainForContext, /p = "x9"/);
   assert.match(mainForContext, /for key, value in pairs\(SplitDevice\(HWID\)\)/);
-  assert.doesNotMatch(mainForContext, /headers\["x-r7q"\]/, 'runtime verifier sends only split Base64 parts');
+  assert.match(mainForContext, /body\.u = HWID/, 'client includes the raw-HWID decoy field');
+  assert.doesNotMatch(mainForContext, /headers\["x-r7q"\]/, 'no plaintext HWID header is sent');
   assert.match(mainForContext, /Body = HttpService:JSONEncode\(body\)/);
   const verifierBody = (mainForContext.match(/local body = \{([\s\S]*?)\n\}/) || [])[1] || '';
   assert.equal(/\b(ticket|hwid|runtimeSecret|scriptToken)\s*=/.test(verifierBody), false,
