@@ -240,9 +240,9 @@ function noteEvent(kind, detail) {
   if (securityEvents.length > EVENTS_MAX) securityEvents.splice(0, securityEvents.length - EVENTS_MAX);
 }
 
-// The client getter HWID is transported as five Base64 fragments. Executor
-// fingerprint headers are deliberately ignored for persistent key identity.
-// Base64 is reversible encoding, not encryption.
+// The client getter HWID is transported as five Base64 fragments. The server
+// requires it to match the executor fingerprint header and trusts that
+// fingerprint when deriving the persistent identifier. Base64 is reversible.
 function hwidFromRequest(req, bodyValue) {
   const result = resolveHwid(req.headers || {}, bodyValue);
   if (!result.ok && result.reason === 'hwid mismatch') {
@@ -837,7 +837,9 @@ async function handleScriptVerify(req, res) {
   if (!device.ok) {
     const categories = {
       'invalid hwid format': 'D2_HWID_FORMAT',
+      'fingerprint required': 'D2_FINGERPRINT_MISSING',
       'hwid mismatch': 'D2_HWID_MISMATCH',
+      'hwid fingerprint mismatch': 'D2_HWID_FINGERPRINT_MISMATCH',
       'device mismatch': 'D2_DEVICE_BINDING_MISMATCH',
     };
     return rejectRuntimeVerification(res, 403, categories[device.reason] || 'D2_DEVICE_INVALID');
@@ -946,18 +948,18 @@ async function handleHeartbeat(req, res, ip) {
   }, xorKey));
 }
 
-function verifiedScriptContext(ticket, hwid, scriptName, ip) {
+function verifiedScriptContext(ticket, req, hwid, scriptName, ip) {
   if (typeof ticket !== 'string' || ticket.length > 4096) return { error: 'ticket required', status: 400 };
-  if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512) return { error: 'invalid hwid format', status: 400 };
+  const device = hwidFromRequest(req, hwid);
+  if (!device.ok) return { error: device.reason, status: 403 };
   const payload = verifyTicket(ticket);
   if (!payload || payload.scope !== 'script') return { error: 'invalid ticket', status: 401 };
-  const bindingId = deviceBindingId(hwid);
-  if (!timingSafeStringEquals(payload.hwidHash, hashBindingId(bindingId))) return { error: 'device mismatch', status: 403 };
+  if (!timingSafeStringEquals(payload.hwidHash, hashBindingId(device.bindingId))) return { error: 'device mismatch', status: 403 };
   const name = typeof scriptName === 'string' && scriptName.length ? scriptName : payload.scriptName;
   if (!isValidScriptName(name) || name !== payload.scriptName) return { error: 'scriptName mismatch', status: 403 };
-  const reason = checkRevoked({ hwid, userId: payload.userId, ip });
+  const reason = checkRevoked({ hwid: device.hwid, userId: payload.userId, ip });
   if (reason) return { error: 'Banned: ' + reason, status: 403 };
-  return { payload, name, hwidHash: hashBindingId(bindingId) };
+  return { payload, name, hwidHash: hashBindingId(device.bindingId) };
 }
 
 async function handleStart(req, res, ip) {

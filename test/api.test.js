@@ -45,55 +45,75 @@ function stop() {
 }
 
 let requestCounter = 1;
+function inferredHwid(body, headers) {
+  if (['b', 'c', 'd', 'e', 'f'].every((key) => typeof body?.[key] === 'string')) {
+    try { return Buffer.from(['b', 'c', 'd', 'e', 'f'].map((key) => body[key]).join(''), 'base64').toString('utf8'); }
+    catch { return ''; }
+  }
+  if (typeof body?.c === 'string') return body.c;
+  return headers['x-r7q'] || headers['x-ms999-hwid'] || '';
+}
 async function post(pathname, body, headers = {}) {
+  const inferred = inferredHwid(body, headers);
+  const outgoingHeaders = {
+    'content-type': 'application/json',
+    'x-roblox-client': 'test',
+    'x-forwarded-for': `198.51.100.${requestCounter++}`,
+    ...(inferred ? { 'X-Unknown-Executor-FiNgErPrInT': inferred } : {}),
+    ...headers,
+  };
   return fetch(`http://127.0.0.1:${port}${pathname}`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-roblox-client': 'test',
-      'x-forwarded-for': `198.51.100.${requestCounter++}`,
-      ...headers,
-    },
+    headers: outgoingHeaders,
     body: JSON.stringify(body),
   });
 }
 
 async function main() {
-  // HWID-only binding: the canonical HWID's Base64 representation is stable,
-  // while executor fingerprint headers have no effect on the identity.
+  // Fingerprint is authoritative, but the decoded HWID must match it.
   const pair = resolveHwid({
-    'x-r7q': ' Native-ID ',
-    'Syn-Fingerprint': ' Executor-ID-01 ',
+    'x-r7q': 'native-id',
+    'X-Whatever-FiNgErPrInT': ' native-id ',
   }, 'native-id');
   assert.equal(pair.ok, true);
-  assert.equal(pair.hwid, 'Native-ID');
-  assert.equal(pair.fingerprint, undefined);
+  assert.equal(pair.hwid, 'native-id');
+  assert.equal(pair.fingerprint, 'native-id');
   assert.equal(pair.bindingId, Buffer.from('native-id').toString('base64'));
-  assert.equal(resolveHwid({ 'x-ms999-hwid': 'legacy-id' }, 'legacy-id').ok,
-    true, 'server can accept already-deployed legacy clients during transition');
+  assert.equal(resolveHwid({
+    'x-r7q': 'device-A',
+    'Custom-Client-FINGERPRINT': 'device-A',
+    'X-FINGERPRINT-ALT': 'other-device',
+  }, 'device-A').reason, 'hwid fingerprint mismatch',
+  'every fingerprint-named header must agree with HWID');
+  assert.equal(resolveHwid({ 'x-ms999-hwid': 'legacy-id', 'syn-fingerprint': 'legacy-id' }, 'legacy-id').ok,
+    true, 'legacy HWID fields still require a matching fingerprint');
   assert.equal(resolveHwid({ 'x-r7q': 'device-A' }, 'device-B').reason,
     'hwid mismatch', 'rejects conflicting explicit HWID values');
   assert.equal(resolveHwid({ 'Syn-Fingerprint': 'Executor-ID-01' }).reason,
     'invalid hwid format', 'fingerprint alone is not a HWID');
-  assert.equal(resolveHwid({ 'x-r7q': 'device-A' }, 'device-A').bindingId,
-    deviceBindingId('device-A'), 'HWID alone produces the persistent binding');
+  assert.equal(resolveHwid({ 'x-r7q': 'device-A' }, 'device-A').reason,
+    'fingerprint required', 'requires the fingerprint header');
+  assert.equal(resolveHwid({ 'x-r7q': 'device-A', 'syn-fingerprint': 'other-device' }, 'device-A').reason,
+    'hwid fingerprint mismatch', 'rejects a fingerprint that does not match HWID');
+  assert.equal(resolveHwid({ 'x-r7q': 'device-A', 'syn-fingerprint': 'DEVICE-A' }, 'device-A').reason,
+    'hwid fingerprint mismatch', 'fingerprint header name is case-insensitive but its value must match exactly');
   assert.equal(resolveHwid({}).reason, 'invalid hwid format',
     'rejects a request without the client getter HWID');
   assert.equal(
     deviceBindingId(' Native-ID '),
     deviceBindingId('native-id'),
-    'canonicalization makes equivalent HWIDs stable',
+    'canonicalization makes equivalent fingerprints stable',
   );
   assert.notEqual(
     deviceBindingId('native-id'),
     deviceBindingId('different-id'),
-    'changing the HWID changes the bound identity',
+    'changing the authoritative fingerprint changes the bound identity',
   );
   assert.deepEqual(Object.values(deviceParts('Native-ID')).join(''),
     Buffer.from('native-id').toString('base64'), 'five Base64 request parts reassemble exactly');
 
   // Platoboost only accepts one identifier; ensure it receives the hash of the
-  // case-sensitive Base64 HWID binding, not the plaintext getter value.
+  // exact Base64 binding derived from the matching fingerprint, not raw HWID.
   const { verifyKey } = require('../lib/platoboost');
   const oldFetch = global.fetch;
   const oldService = process.env.PLATO_SERVICE_ID;
@@ -238,18 +258,24 @@ async function main() {
   const script = await post('/api/q', {
     p: 'x9', a: ticket, ...deviceParts(hwid), u: 'not-the-ticket-hwid', g: 'main', q: '',
     s: 'y'.repeat(64), t: 'x',
-  }, { 'syn-fingerprint': 'different-executor-fingerprint' });
+  });
   assert.equal(script.status, 409, 'a missing hop is rejected before the proof check');
   assert.equal((await script.json()).diagnostic, 'D2_HOP_MISSING',
-    'fingerprint changes do not affect the HWID-only ticket binding');
+    'the mismatched raw decoy does not override matching Base64 HWID and fingerprint');
 
-  // A fingerprint header cannot substitute for a missing HWID.
+  const mismatchRuntime = await post('/api/q', {
+    p: 'x9', a: ticket, ...deviceParts(hwid), g: 'main', q: '',
+    s: 'y'.repeat(64), t: 'x',
+  }, { 'syn-fingerprint': 'different-executor-fingerprint' });
+  assert.equal(mismatchRuntime.status, 403);
+  assert.equal((await mismatchRuntime.json()).diagnostic, 'D2_HWID_FINGERPRINT_MISMATCH');
+
+  // Fingerprint is required, but cannot substitute for a missing HWID.
   const fingerprintOnlyRuntime = await post('/api/q', {
     p: 'x9', a: ticket, g: 'main', q: '', s: 'y'.repeat(64), t: 'x',
   }, { 'syn-fingerprint': 'syn-device-01' });
   assert.equal(fingerprintOnlyRuntime.status, 403);
-  assert.equal((await fingerprintOnlyRuntime.json()).diagnostic, 'D2_HWID_FORMAT',
-    'fingerprint is ignored and cannot provide the client getter HWID');
+  assert.equal((await fingerprintOnlyRuntime.json()).diagnostic, 'D2_HWID_FORMAT');
 
   const forgedHop = await post('/api/script-verify', {
     ticket, c: hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',

@@ -52,10 +52,10 @@ PORT=10000 node server.js
 
 | บริการ | ที่อยู่ | สถานะ |
 |---|---|---|
-| เว็บ + API | https://loader999ms.vercel.app | latest confirmed: `7e05ddf` (opaque request fields; no realtime/WebSocket) |
+| เว็บ + API | https://loader999ms.vercel.app | HWID-only, commit `ba0738f` (no realtime/WebSocket) |
 | แผงควบคุม | https://loader999ms.vercel.app/control | HTTP only |
 
-การเปลี่ยน HWID-only แบบ 5 ส่วน Base64 (รวม field `u` ที่ส่ง HWID ต้นฉบับเป็น decoy ซึ่ง server ไม่ใช้) ผ่าน test/build ในเครื่องแล้ว แต่ยังไม่ push/deploy; production ล่าสุดที่ยืนยันได้ยังเป็น composite HWID+fingerprint จาก `7e05ddf`.
+Production ยังเป็น commit `ba0738f` (HWID จาก Base64 5 ส่วน; ละเว้น decoy `u` และยังไม่เทียบ fingerprint). การเปลี่ยนล่าสุดให้ตรวจค่า HWID กับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก ผ่าน test/build ในเครื่องแล้ว แต่ยังไม่ push/deploy.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -127,7 +127,7 @@ local gamaramam = { "<base>/<token>" }
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
 
-## 2026-10-18 — HWID-only binding, 5 Base64 parts + ignored raw decoy (locally validated; pending deploy)
+## 2026-10-18 — HWID-only binding, 5 Base64 parts + ignored raw decoy (deployed `ba0738f`)
 
 - Platoboost ยังเป็นผู้ตรวจสอบคีย์และอุปกรณ์ ไม่มีการเพิ่มฐานข้อมูลคีย์แยก
 - Client อ่าน HWID ผ่าน `gethwid()`, `get_exwid()` และ aliases ที่รองรับ; ถ้า getter ใช้ไม่ได้จะหยุด และไม่ fallback ไป `GetClientId()` ของ Roblox
@@ -139,6 +139,12 @@ local gamaramam = { "<base>/<token>" }
 
 **ข้อจำกัด:** field decoy `u` เปิดเผย HWID ต้นฉบับใน request แต่ server ไม่อ่านค่านั้น; การมีค่า decoy ไม่ได้หลอกผู้ที่ตรวจ request ได้ และอาจเห็น HWID ได้ทันที. Base64, การแบ่งเป็น 5 ส่วน และชื่อ field แบบ opaque ถอดกลับได้ เป็นเพียงรูปแบบ/การพราง ไม่ใช่ encryption ผู้ใช้ executor สามารถกู้คืนหรือปลอม HWID ที่ client รายงานได้ จึงไม่ใช่ hardware attestation. `lib/999MS-server-sdk.js` เก็บ hop/replay state ไว้ใน memory ของ instance; การกระจาย request ข้าม Vercel instances อาจกระทบ one-time checks และไม่ใช่ durable store ที่แชร์ร่วมกัน.
 
+## 2026-10-19 — Pending deploy: require matching fingerprint header (local tests passed)
+
+- Production `ba0738f` ยังใช้ HWID-only binding.
+- เวอร์ชันที่กำลังปรับจะมองหา HTTP header ใดก็ได้ที่ชื่อมีคำว่า `fingerprint` โดยไม่แยกตัวพิมพ์ใหญ่/เล็ก แล้วตรวจให้ค่าของ header (หลังตัดช่องว่างหัวท้าย) ตรงตัวกับ HWID canonical ที่ถอดจาก `b`–`f`; หากไม่มีหรือไม่ตรงให้ปฏิเสธ
+- fingerprint ที่ตรงจะเป็นค่าหลักในการสร้าง binding ID; field decoy `u` ยังคงถูกละเว้น
+- Fingerprint เป็นข้อมูลที่ client ส่งมา ไม่ใช่ hardware attestation; การเปรียบเทียบนี้ไม่ได้ป้องกันการปลอมค่าจาก client ที่ควบคุม request ได้
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด
 
