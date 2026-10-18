@@ -7,8 +7,6 @@ if type(scriptName) ~= "string" or #scriptName < 1 or #scriptName > 64
 end
 if scriptName == "Main" then scriptName = "main" end
 
-if not game:IsLoaded() then game.Loaded:Wait() end
-
 local link = "__STAGE2_TOKEN__"
 local url = "__BASE_URL__" .. "/" .. link
 local sha = "__STAGE2_SHA256__"
@@ -24,14 +22,23 @@ local ctx = {
     },
 }
 
-local crypto = (syn and syn.crypt) or crypt
+local crypto = (type(syn) == "table" and syn.crypt) or crypt
 local hasher = type(crypto) == "table" and crypto.hash or nil
 if type(hasher) ~= "function" then
     error("MS999:S1:E04:LOADER_UNAVAILABLE", 0)
 end
 
-local requestFn = (syn and syn.request) or (http and http.request) or request or http_request
-if type(requestFn) ~= "function" then
+local requestCandidates = {
+    type(syn) == "table" and syn.request or false,
+    type(http) == "table" and http.request or false,
+    type(request) == "function" and request or false,
+    type(http_request) == "function" and http_request or false,
+}
+local requestFn
+for _, candidate in ipairs(requestCandidates) do
+    if type(candidate) == "function" then requestFn = candidate; break end
+end
+if not requestFn then
     error("MS999:S1:E06:HTTP_REQUEST_UNAVAILABLE", 0)
 end
 
@@ -47,7 +54,7 @@ local okGet, response = pcall(requestFn, {
     Body = '{"p":"' .. proof .. '"}',
 })
 local body = type(response) == "table" and response.Body or nil
-if not okGet or type(body) ~= "string" or body == "" then
+if not okGet or type(body) ~= "string" or body == "" or #body > 256 * 1024 then
     error("MS999:S1:E02:HTTP_GET_FAILED", 0)
 end
 
@@ -65,4 +72,5 @@ if not okCompile or type(chunk) ~= "function" then
     error("MS999:S1:E05:STAGE2_COMPILE_FAILED", 0)
 end
 
+ctx.chain.UpdatedAt = tick()
 return chunk(ctx)

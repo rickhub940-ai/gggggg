@@ -209,6 +209,25 @@ async function main() {
   assert.ok(payloadSource.includes('local StartupError = ""'), 'UI error text uses its own local');
   assert.equal(payloadSource.includes('local E1 = ""'), false, 'UI error text must not shadow RNG helper E1');
 
+  // ── runner-safe failure handling: abort, never kick or deliberately hang ──
+  const loaderSources = [
+    fs.readFileSync(path.join(__dirname, '..', 'source', 'loadc.template.lua'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8'),
+    fs.readFileSync(path.join(__dirname, '..', 'source', 'loader.lua'), 'utf8'),
+    payloadSource,
+    mainForContext,
+  ].join('\n');
+  assert.equal(/:Kick\s*\(|replicatesignal|SecureCrash|NfCrash/.test(loaderSources), false,
+    'client stages must not disconnect a player or use the crash loop');
+  assert.equal(/while\s+true\s+do/.test(loaderSources), false,
+    'loader and payload stages must not contain unbounded loops');
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'loader.lua'), 'utf8'),
+    /if not compileOk or type\(fn\) ~= "function"/);
+  assert.equal(payloadSource.includes('local HttpRequest = nil'), false,
+    'payload must keep the request API passed by the previous stage');
+  assert.match(mainForContext, /local function Abort\(reason\)/,
+    'final verification failures use a non-kicking abort');
+
   // ── client Lua must not carry any realtime code ──
   const mainLua = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
   assert.equal(/WebSocket|websocket|realtime|Realtime/i.test(mainLua), false,

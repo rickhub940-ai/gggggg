@@ -1,78 +1,25 @@
 -- ===========================================================
--- 999MS Payload — UI + Platoboost + Anti-Save (แบบไฟล์ X)
+-- 999MS Payload — UI + server-backed authentication
 -- ===========================================================
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
-local LocalPlayer = Players.LocalPlayer
+local ctx
 
--- Display an opaque local reference rather than exposing a human-readable
--- client-side check reason in Roblox's error prompt.
-local function makeKickCode(reason)
-    local text = tostring(reason or "unknown")
-    local hash = 5381
-    for index = 1, #text do
-        hash = (hash * 33 + text:byte(index) + index) % 2147483647
-    end
-    return string.format("MS9-%08X", hash)
+local function Abort(reason)
+    local stop = type(ctx) == "table" and ctx.stopChecks or nil
+    if type(stop) == "function" then pcall(stop) end
+    local message = "[999MS] " .. tostring(reason or "stage aborted")
+    if type(warn) == "function" then warn(message) else print(message) end
+    return false
 end
-
-local function patchErrorPrompt(code)
-    local success, changed = pcall(function()
-        local root = CoreGui:FindFirstChild("RobloxPromptGui")
-        local overlay = root and root:FindFirstChild("promptOverlay")
-        local prompt = overlay and overlay:FindFirstChild("ErrorPrompt")
-        local titleFrame = prompt and prompt:FindFirstChild("TitleFrame")
-        local title = titleFrame and titleFrame:FindFirstChild("ErrorTitle")
-        local messageArea = prompt and prompt:FindFirstChild("MessageArea")
-        local errorFrame = messageArea and messageArea:FindFirstChild("ErrorFrame")
-        local label = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
-        if not title or not label then return false end
-        title.Text = "[999MS]"
-        label.Text = "Session terminated.\nReference: " .. code
-        return true
-    end)
-    return success and changed
-end
-
-local function Kick(reason)
-    local code = makeKickCode(reason)
-    pcall(function()
-        CoreGui.ChildAdded:Connect(function(child)
-            if child.Name == "RobloxPromptGui" then
-                task.spawn(function()
-                    task.wait(0.01)
-                    patchErrorPrompt(code)
-                end)
-            end
-        end)
-    end)
-    task.spawn(function()
-        for _ = 1, 50 do
-            if patchErrorPrompt(code) then break end
-            task.wait(0.01)
-        end
-    end)
-    -- Best-effort executor signal trigger requested for compatible executors.
-    -- It is not a portable disconnect primitive, so LocalPlayer:Kick remains
-    -- the fail-closed fallback that actually enforces the disconnect.
-    pcall(function()
-        if type(replicatesignal) == "function" and LocalPlayer.StatsAvailable then
-            replicatesignal(LocalPlayer.StatsAvailable, "Kick")
-        end
-    end)
-    return LocalPlayer:Kick(code)
-end
-
-local RunService = game:GetService("RunService")
 
 local BASE_URL = "@BASE_URL@"
 local CHAIN_VERSION = "999MS-chain-v1"
-local CHAIN_TTL = 20
+local CHAIN_TTL = 60
 local CHAIN_SESSION_TTL = 30 * 60
 
-local ctx = ...
-if type(ctx) ~= "table" then return Kick("[999MS] Context missing") end
+ctx = ...
+if type(ctx) ~= "table" then return Abort("[999MS] Context missing") end
 local Chain = ctx.chain
 local ChainId = type(Chain) == "table" and Chain.Id or nil
 local function chainIs(stage, maxAge)
@@ -89,101 +36,26 @@ local function chainIs(stage, maxAge)
 end
 
 if not chainIs("loader", CHAIN_TTL) then
-    return Kick("[999MS] Chain rejected: run loadc.lua")
+    return Abort("[999MS] Chain rejected: run loadc.lua")
 end
-
--- ═══ L1-L3: Loader Proof ═══
-local LoaderProof = ctx.loaderProof
-local LoaderTime = ctx.loaderTime
-local LoaderMarker = ctx.loaderMarker
-
-if type(LoaderProof) ~= "string" then
-    return Kick("[999MS] L1: Not run via loader")
-end
-if not LoaderProof:match("^999MS_loader_v1:[a-z]+$") then
-    return Kick("[999MS] L1: Invalid proof")
-end
-if not LoaderTime or (tick() - LoaderTime) > 10 then
-    return Kick("[999MS] L2: Proof expired")
-end
-if type(LoaderMarker) ~= "string" or not LoaderMarker:match("^LSE_%d+$") then
-    return Kick("[999MS] L3: Invalid marker")
-end
-if not chainIs("loader", CHAIN_TTL) then
-    return Kick("[999MS] Chain interrupted before payload")
+if ctx.sourceSaved then return Abort("source marker was saved") end
+if not chainIs("loader", 60) then
+    return Abort("[999MS] Chain interrupted before payload")
 end
 Chain.Stage = "payload"
 Chain.UpdatedAt = tick()
 
--- ═══ Signal bus ═══
-local MS999Signal = ctx.signal
-if type(MS999Signal) ~= "table" then
-    return Kick("[999MS] Signal bus missing")
-end
-
--- ═══ Capture real ═══
--- Stage 2 passes its trusted write monitor through the local context. Prefer
--- that reference so an executor alias split is not a false positive.
-local Stage2WriteMonitor = ctx.writeMonitor
-local RealGlobalWriteFile = writefile
-local RealWriteFile = type(Stage2WriteMonitor) == "function" and Stage2WriteMonitor or RealGlobalWriteFile
-local RealIsHooked = isfunctionhooked
-local RealDebugGetInfo = debug.getinfo
-local RealHookFunction = hookfunction
-local RealRawset = rawset
-local RealRawget = rawget
-local RealLoadstring = loadstring
-
--- ═══ L4-L6: hook check ═══
-if type(RealWriteFile) == "function" then
-    local info = RealDebugGetInfo(RealWriteFile)
-    if not info or info.what ~= "C" then
-        return Kick("[999MS] L4: writefile wrapped")
-    end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, RealWriteFile)
-        local stageTwoMonitor = ctx.writeMonitor
-        if ok and hooked and stageTwoMonitor ~= RealWriteFile then
-            return Kick("[999MS] L4: writefile hooked")
-        end
-    end
-end
-
-if type(RealHookFunction) == "function" then
-    local info = RealDebugGetInfo(RealHookFunction)
-    if not info or info.what ~= "C" then
-        return Kick("[999MS] L5: hookfunction wrapped")
-    end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, RealHookFunction)
-        if ok and hooked then
-            return Kick("[999MS] L5: hookfunction hooked")
-        end
-    end
-end
-
-if type(RealRawset) == "function" then
-    local info = RealDebugGetInfo(RealRawset)
-    if not info or info.what ~= "C" then
-        return Kick("[999MS] L6: rawset wrapped")
-    end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, RealRawset)
-        if ok and hooked then
-            return Kick("[999MS] L6: rawset hooked")
-        end
-    end
-end
-
-print("[999MS] Payload L1-L6 passed")
+-- ═══ Essential hand-off APIs ═══
+local RealLoadstring = loadstring or load
+local HttpRequest = ctx.request
+if type(RealLoadstring) ~= "function" then return Abort("loadstring API unavailable") end
+if type(HttpRequest) ~= "function" then return Abort("HTTP request API unavailable") end
 
 -- ===========================================================
 -- Anti-Save
 --
--- The loader owns the writefile monitor and sends detections through
--- MS999Signal.OnDetect. Do not install a second hook here: it would require
--- a non-standard executor Signal API and make the loader's hook look like tampering
--- during this payload's L4 preflight.
+-- Stage 2 owns an optional, marker-only write monitor. Auth and chain
+-- validation remain server-backed; no executor-internal hook checks run here.
 -- ===========================================================
 
 -- ═══ Locals ═══
@@ -202,26 +74,13 @@ local Gmatch = ("").gmatch
 local ServerId = ""
 local XORKey = ""
 local Ticket = ""
--- Every guarded stage bumps this. A chapter that is skipped (early return
--- injected by a hook) leaves the count short and is caught at the hand-off.
-local Step = 0
-local STEP_TARGET = 4
-local HttpRequest = nil
-local HeartbeatAlive = false
 local ChecksActive = true
 
 -- ═══ Helpers ═══
-local function SecureCrash()
-    if NfCrash then NfCrash() else while true do end end
-end
-
--- Stop all post-load monitoring and discard this loader's session state. The
--- stage-2 write hook is disabled through MS999ChecksActive because executors
--- do not provide a portable, safe unhook API.
+-- Stop post-load monitoring without disconnecting or suspending the client.
 local function StopChecks()
     if not ChecksActive then return end
     ChecksActive = false
-    HeartbeatAlive = false
     Ticket = ""
     ServerId = ""
     XORKey = ""
@@ -230,56 +89,13 @@ local function StopChecks()
         ctx.chain = nil
     end
     local stopStageTwo = ctx.stopChecks
-    if type(stopStageTwo) == "function" then
-        pcall(stopStageTwo)
-    else
-        ctx.checksActive = false
-        ctx.writeMonitor = nil
-    end
-
-    ctx.loaderProof = nil
-    ctx.loaderTime = nil
-    ctx.loaderMarker = nil
-    ctx.signal = nil
+    if type(stopStageTwo) == "function" then pcall(stopStageTwo) end
     ctx.request = nil
-    ctx.requestAudit = nil
+    ctx.writeMonitor = nil
     ctx.key = nil
     ctx.running = nil
 end
 
-local function KickPlayer(Reason, Code)
-    local detail = tostring(Reason)
-    print("[999MS] Kick:", makeKickCode(detail))
-    if Code == 0 and rawequal(Code, 0) then
-        Kick(detail)
-    elseif Code == 1 and rawequal(Code, 1) then
-        Kick(detail)
-        if math.random() == math.random() then SecureCrash() end
-        task.wait(math.random(13, 28))
-        SecureCrash()
-    else
-        Kick(detail)
-    end
-end
-
-local function TamperKick(code)
-    pcall(function()
-        Kick("[999MS] Tamper detected (" .. code .. ")")
-    end)
-    task.wait(0.3)
-    SecureCrash()
-end
-
-local function SecureEQ(a, b)
-    if type(a) ~= type(b) then return false end
-    local T = {}
-    if a ~= b then return false end
-    T[a] = 3569
-    if T[b] ~= 3569 then return false end
-    T[b] = nil
-    if T[a] ~= nil then return false end
-    return true
-end
 
 local function Split(str, sep)
     local out = {}
@@ -290,160 +106,36 @@ local function Split(str, sep)
 end
 
 local function GetHWID()
-    -- Only accept executor-native getters; a Lua callback is caller-controlled.
+    -- Executors expose this API under different names and may wrap it in Lua.
+    -- Accept any callable candidate that returns a plausible string; the server
+    -- still binds and verifies the returned value for the session.
     local fs = {}
-    local f = type(syn) == "table" and syn.get_hwid or nil
-    if f then fs[#fs + 1] = f end
-    f = get_hwid
-    if f then fs[#fs + 1] = f end
-    f = gethwid
-    if f then fs[#fs + 1] = f end
-    for _, f in ipairs(fs) do
-        if type(f) == "function" then
-            local o, i = pcall(RealDebugGetInfo, f)
-            if o and type(i) == "table" and i.what == "C" then
-                local h = false
-                if type(RealIsHooked) == "function" then
-                    local q
-                    q, h = pcall(RealIsHooked, f)
-                    if not q then h = true end
-                end
-                if not h then
-                    local q, v = pcall(f)
-                    if q and type(v) == "string" and #v >= 4 and #v <= 512 then return v end
-                end
-            end
+    if type(syn) == "table" and type(syn.get_hwid) == "function" then
+        fs[#fs + 1] = syn.get_hwid
+    end
+    if type(get_hwid) == "function" then fs[#fs + 1] = get_hwid end
+    if type(gethwid) == "function" then fs[#fs + 1] = gethwid end
+    for _, fn in ipairs(fs) do
+        local ok, value = pcall(fn)
+        if ok and type(value) == "string" and #value >= 4 and #value <= 512 then
+            return value
         end
     end
-    -- Some executors expose no HWID getter. The Roblox client ID is a stable
-    -- engine-issued fallback, unlike AccountAge/UserId or a caller Lua closure.
-    local q, v = pcall(function()
+    local ok, value = pcall(function()
         return game:GetService("RbxAnalyticsService"):GetClientId()
     end)
-    if q and type(v) == "string" and #v >= 16 and #v <= 512 then return v end
+    if ok and type(value) == "string" and #value >= 16 and #value <= 512 then
+        return value
+    end
     return nil
 end
 
--- ═══ T2-T19 ═══
-if ctx.running then return end
-ctx.running = true
-
-if RunService:IsStudio() then return TamperKick("T2") end
-
-do
-    -- Test normal protected execution instead of calling pcall with an invalid
-    -- signature; some executors implement that edge case differently.
-    local ok, value = pcall(function() return 3569 end)
-    if not ok or value ~= 3569 then return TamperKick("T3") end
-end
-
-local function CheckFn(name, fn)
-    if type(fn) ~= "function" then TamperKick("T4:" .. name); return false end
-    -- Compatible mode: only perform the hook audit when this executor exposes
-    -- it. A C-closure appearance alone is not treated as proof of authenticity.
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, fn)
-        if not ok or hooked then TamperKick("T4:" .. name); return false end
-    end
-    return true
-end
-
-if type(RealIsHooked) == "function" and not CheckFn("isfunctionhooked", RealIsHooked) then return end
-if not CheckFn("debug.getinfo", debug.getinfo) then return end
-if not CheckFn("loadstring", loadstring) then return end
-if not CheckFn("pcall", pcall) then return end
-if not CheckFn("math.random", math.random) then return end
-
-do
-    if math.random(1, 2) == math.random(3, 4) then return TamperKick("T5") end
-    local Same, Last = 0, 0
-    for _ = 1, 100 do
-        local Cur = math.random(1, 3569)
-        if Cur == Last then Same = Same + 1 end
-        Last = Cur
-    end
-    if Same > 10 then return TamperKick("T5") end
-end
-
-do
-    local test = {}
-    ctx.test = test
-    if ctx.test ~= test then return TamperKick("T6") end
-    ctx.test = nil
-end
-
-local function CheckExecutorApiRefs()
-    local expected = {
-        loadstring = RealLoadstring,
-        writefile = RealGlobalWriteFile,
-        isfunctionhooked = RealIsHooked,
-        getinfo = RealDebugGetInfo,
-        hookfunction = RealHookFunction,
-        rawset = RealRawset,
-        rawget = RealRawget,
-    }
-    local current = {
-        loadstring = loadstring,
-        writefile = writefile,
-        isfunctionhooked = isfunctionhooked,
-        getinfo = debug.getinfo,
-        hookfunction = hookfunction,
-        rawset = rawset,
-        rawget = rawget,
-    }
-    for name, original in pairs(expected) do
-        if type(original) == "function" and current[name] ~= original then
-            return false, name .. " changed"
-        end
-    end
-    return true
-end
-
-do
-    local ok, reason = CheckExecutorApiRefs()
-    if not ok then return TamperKick("T-RAWSET3:" .. reason) end
-end
-
 local SafeLoadstring = RealLoadstring
-local SafeSetClipboard = setclipboard or toclipboard
-
-do
-    if type(SafeLoadstring) ~= "function" then return TamperKick("T13") end
-    local info = debug.getinfo(SafeLoadstring)
-    if not info or info.what ~= "C" then return TamperKick("T13") end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, SafeLoadstring)
-        if not ok or hooked then return TamperKick("T13") end
-    end
-    if loadstring ~= SafeLoadstring then return TamperKick("T13") end
-    local ok, fn = pcall(SafeLoadstring, "return 1 + 1")
-    if not ok or type(fn) ~= "function" then return TamperKick("T13") end
-    local ok2, result = pcall(fn)
-    if not ok2 or result ~= 2 then return TamperKick("T13") end
+if not chainIs("payload", CHAIN_SESSION_TTL) then
+    return Abort("[999MS] Chain expired before authentication")
 end
 
-if type(hookfunction) == "function" and type(RealIsHooked) == "function" then
-    local ok, hooked = pcall(RealIsHooked, hookfunction)
-    if not ok or hooked then return TamperKick("T16") end
-end
-
--- Use the request function captured and audited by the loader instead of
--- resolving a fresh global alias that may have been replaced afterwards.
-do
-    local capturedRequest = ctx.request
-    if type(capturedRequest) ~= "function" then
-        return TamperKick("HTTP: missing captured request")
-    end
-    if type(RealIsHooked) == "function" then
-        local ok, hooked = pcall(RealIsHooked, capturedRequest)
-        if not ok or hooked then
-            return TamperKick("HTTP: request hooked")
-        end
-    end
-    HttpRequest = capturedRequest
-end
-
-print("[999MS] Payload tamper checks passed")
+print("[999MS] Runtime APIs ready")
 
 -- ═══ Crypto ═══
 local Charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -529,7 +221,10 @@ local function GetRngSeed() return math.random(1, 1000000) end
 local function E1() return tonumber(#game:GetService("Workspace"):GetChildren()) end
 local function E2() return tonumber(#game:GetChildren()) end
 local function E3() return tonumber(#game:GetService("Players"):GetPlayers()) end
-local function E4() return tonumber(Players.LocalPlayer.UserId) end
+local function E4()
+    local player = Players.LocalPlayer
+    return player and tonumber(player.UserId) or 0
+end
 local function E5() return tonumber(game.PlaceId) end
 local function E6()
     local s = (game.JobId or ""):gsub("-", "")
@@ -566,105 +261,11 @@ local function R5()
     return Equate(((r9 ~= 0) and (m * r9) or m) + E6() + r10)
 end
 
--- ═══ JSON (own decoder) ═══
--- Parsing the response with our own decoder means a hook on
--- HttpService:JSONDecode cannot rewrite a rejection into an approval.
-local JsonDecode
-do
-    local escapes = { ["b"] = "\b", ["f"] = "\f", ["n"] = "\n", ["r"] = "\r", ["t"] = "\t", ['"'] = '"', ["\\"] = "\\", ["/"] = "/" }
-    local function skip(text, index)
-        while true do
-            local ch = text:sub(index, index)
-            if ch == " " or ch == "\t" or ch == "\n" or ch == "\r" then index = index + 1 else break end
-        end
-        return index
-    end
-    local parseValue
-    local function parseString(text, index)
-        local out = {}
-        index = index + 1
-        while true do
-            local ch = text:sub(index, index)
-            if ch == "" then error("unterminated string") end
-            if ch == '"' then return table.concat(out), index + 1 end
-            if ch == "\\" then
-                local code = text:sub(index + 1, index + 1)
-                if code == "u" then
-                    local hex = text:sub(index + 2, index + 5)
-                    local num = tonumber(hex, 16) or 63
-                    out[#out + 1] = Char(num)
-                    index = index + 6
-                else
-                    out[#out + 1] = escapes[code] or code
-                    index = index + 2
-                end
-            else
-                out[#out + 1] = ch
-                index = index + 1
-            end
-        end
-    end
-    local function parseNumber(text, index)
-        local raw = text:match("^-?%d+%.?%d*[eE]?[-+]?%d*", index)
-        if not raw or raw == "" then error("bad number") end
-        return tonumber(raw), index + #raw
-    end
-    local function parseTable(text, index)
-        index = skip(text, index + 1)
-        local result = {}
-        if text:sub(index, index) == "]" then return result, index + 1 end
-        local position = 1
-        while true do
-            local value
-            value, index = parseValue(text, index)
-            result[position] = value
-            position = position + 1
-            index = skip(text, index)
-            local ch = text:sub(index, index)
-            index = index + 1
-            if ch == "]" then return result, index end
-            if ch ~= "," then error("bad array") end
-            index = skip(text, index)
-        end
-    end
-    local function parseObject(text, index)
-        index = skip(text, index + 1)
-        local result = {}
-        if text:sub(index, index) == "}" then return result, index + 1 end
-        while true do
-            local key
-            key, index = parseString(text, index)
-            index = skip(text, index)
-            if text:sub(index, index) ~= ":" then error("bad object") end
-            index = skip(text, index + 1)
-            local value
-            value, index = parseValue(text, index)
-            result[key] = value
-            index = skip(text, index)
-            local ch = text:sub(index, index)
-            index = index + 1
-            if ch == "}" then return result, index end
-            if ch ~= "," then error("bad object") end
-            index = skip(text, index)
-        end
-    end
-    parseValue = function(text, index)
-        index = skip(text, index)
-        local ch = text:sub(index, index)
-        if ch == "{" then return parseObject(text, index) end
-        if ch == "[" then return parseTable(text, index) end
-        if ch == '"' then return parseString(text, index) end
-        if ch == "t" then return true, index + 4 end
-        if ch == "f" then return false, index + 5 end
-        if ch == "n" then return nil, index + 4 end
-        return parseNumber(text, index)
-    end
-    JsonDecode = function(text)
-        if type(text) ~= "string" or #text == 0 then return nil end
-        local ok, value = pcall(function() return (parseValue(text, 1)) end)
-        if not ok then return nil end
-        return value
-    end
+-- Use Roblox's JSON decoder after bounding the response size.
+local function JsonDecode(text)
+    if type(text) ~= "string" or #text == 0 or #text > 2 * 1024 * 1024 then return nil end
+    local ok, value = pcall(function() return HttpService:JSONDecode(text) end)
+    return ok and value or nil
 end
 
 local function EncodeJson(value)
@@ -713,11 +314,12 @@ local function postJSON(path, payload, hwid)
         Body = EncodeJson(payload),
     })
     if not ok or type(res) ~= "table" then return nil, "Connection failed" end
-    local status = res.StatusCode or res.Status
+    local status = tonumber(res.StatusCode or res.Status)
     local responseBody = res.Body
     if type(status) ~= "number" or type(responseBody) ~= "string" then
         return nil, "Malformed response"
     end
+    if #responseBody > 2 * 1024 * 1024 then return nil, "Response too large" end
     local decoded = JsonDecode(responseBody)
     if type(decoded) ~= "table" then return nil, "Invalid response" end
     return { status = status, data = decoded, body = responseBody }, nil
@@ -739,10 +341,10 @@ local MS999_UI = nil
 local function LoadScript(d, h)
     if not ChecksActive then return end
     if not chainIs("payload", CHAIN_SESSION_TTL) then
-        return KickPlayer("[999MS] Chain expired before script", 0)
+        return Abort("[999MS] Chain expired before script")
     end
     if type(h) ~= "string" or #h < 4 or #h > 512 then
-        return KickPlayer("Invalid device context", 0)
+        return Abort("Invalid device context")
     end
     Chain.Stage = "script"
     Chain.Script = SCRIPT_NAME_LOCKED
@@ -753,12 +355,12 @@ local function LoadScript(d, h)
     local p = d.hop or ""
     local q = Ticket
     if type(r) ~= "string" or #r ~= 64 then
-        return KickPlayer("Invalid runtime secret", 0)
+        return Abort("Invalid runtime secret")
     end
     if type(q) ~= "string" or q == ""
         or type(s) ~= "string" or s == ""
         or type(p) ~= "string" or p == "" then
-        return KickPlayer("Invalid session context", 0)
+        return Abort("Invalid session context")
     end
 
     ServerId = d.ServerId or ""
@@ -767,17 +369,10 @@ local function LoadScript(d, h)
 
     print("[999MS] Loading main script...")
 
-    -- Every guarded stage above bumped Step. A hook that short-circuits one of
-    -- them leaves the count short, so the hand-off refuses to run.
-    if Step ~= STEP_TARGET then
-        TamperKick("S9")
-        return
-    end
-
-    local chunk = SafeLoadstring(d.Body)
-    if not chunk then return KickPlayer("Load failed", 0) end
-    local ok = pcall(chunk, true, q, s, r, p, SCRIPT_NAME_LOCKED, tick(), h, HttpRequest, Chain, ctx)
-    if not ok then return KickPlayer("Run failed", 0) end
+    local compileOk, chunk = pcall(SafeLoadstring, d.Body)
+    if not compileOk or type(chunk) ~= "function" then return Abort("Load failed") end
+    local ok, result = pcall(chunk, true, q, s, r, p, SCRIPT_NAME_LOCKED, tick(), h, HttpRequest, Chain, ctx)
+    if not ok or result == false then return Abort("Run failed") end
 
     print("[999MS] Main script loaded")
 
@@ -789,20 +384,16 @@ end
 local function FetchAndLoad(key, sname)
     if not ChecksActive then return nil, "Cancelled" end
     if not chainIs("payload", CHAIN_SESSION_TTL) then
-        KickPlayer("[999MS] Chain expired", 0)
+        Abort("[999MS] Chain expired")
         return nil, "Chain expired"
     end
-    local authScope = 0
     local hwid = GetHWID()
     if type(hwid) ~= "string" then
         return nil, "Trusted executor device ID unavailable"
     end
-    local userId = tostring(Players.LocalPlayer.UserId)
-
-    -- One attempt, one counter. It used to accumulate across attempts, so a
-    -- failed auto-load with a stale cached key followed by a manual login left
-    -- Step at 5 and the hand-off kicked with S9 even though the key passed.
-    Step = 1
+    local player = Players.LocalPlayer
+    if not player then return nil, "Player context unavailable" end
+    local userId = tostring(player.UserId)
 
     -- Generate the challenge before the first call: the server transforms these
     -- values and we invert the transform to prove the response is genuine.
@@ -826,26 +417,22 @@ local function FetchAndLoad(key, sname)
     if r1.status ~= 200 or r1.data.valid ~= true then
         return nil, r1.data.message or r1.data.error or "Invalid key"
     end
-    authScope = authScope + 1
     if not ChecksActive then return nil, "Cancelled" end
 
     Ticket = r1.data.ticket
     XORKey = r1.data.k or ""
-    Step = Step + 1
 
-    -- Invert the server-side transforms. A hooked or replayed response cannot
-    -- carry the correct pair for values it never saw.
+    -- Invert the server-side transforms and compare them with this request's
+    -- challenge values before accepting the response.
     if type(r1.data.check) == "string" then
         local parts = Split(r1.data.check, "|")
         if #parts ~= 5 then return nil, "Bad challenge" end
         for index = 1, 5 do
             local restored = RestoreChallenge(index, tonumber(parts[index]))
             if restored ~= ({ rng.Rng1, rng.Rng2, rng.Rng3, rng.Rng4, rng.Rng5 })[index] then
-                Step = Step - 47
                 return nil, "Challenge mismatch"
             end
         end
-        Step = Step + 1
     else
         return nil, "Missing challenge"
     end
@@ -883,7 +470,6 @@ local function FetchAndLoad(key, sname)
 
     if not okDec or type(decrypted) ~= "table" then return nil, "Decode failed" end
     if decrypted.Valid ~= true then return nil, decrypted.reason or "Server rejected" end
-    authScope = authScope + 1
 
     if type(decrypted.check) ~= "string" then return nil, "RNG challenge missing" end
     local parts = Split(decrypted.check, "|")
@@ -892,15 +478,11 @@ local function FetchAndLoad(key, sname)
     local rngOriginals = { rng.Rng1, rng.Rng2, rng.Rng3, rng.Rng4, rng.Rng5 }
     for index = 1, 5 do
         local restored = RestoreChallenge(index, tonumber(parts[index]))
-        if restored == nil or not SecureEQ(restored, rngOriginals[index]) then
-            Step = Step - 47
+        if restored == nil or restored ~= rngOriginals[index] then
             return nil, "RNG check failed"
         end
     end
-    Step = Step + 1
 
-    authScope = authScope + 1
-    if authScope ~= 3 then return nil, "Authentication flow interrupted" end
     return decrypted, hwid
 end
 
@@ -913,7 +495,11 @@ local function MakeUI()
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     pcall(function() gui.Parent = game:GetService("CoreGui") end)
-    if not gui.Parent then gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui") end
+    if not gui.Parent then
+        local player = Players.LocalPlayer
+        local playerGui = player and player:FindFirstChildOfClass("PlayerGui")
+        if playerGui then gui.Parent = playerGui end
+    end
     MS999_UI = gui
 
     local frame = Instance.new("Frame")

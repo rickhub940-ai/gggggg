@@ -1,4 +1,4 @@
--- Stage 2: remove dumped copies of this checker, then terminate.
+-- Stage 2: detect only marked copies and hand off without blocking the client.
 -- ═══ HEADER ═══ kept verbatim and outside the compacted body.
 -- The one entry is the request for the next stage link; the line it forms,
 -- `local gamaramam = { "<base>/<token>" }`, is also what a dumped copy of this
@@ -9,66 +9,12 @@ local gamaramam = {
 -- ═══ BODY ═══ everything below is compacted at build time.
 local ctx = ...
 if type(ctx) ~= "table" then error("MS999:CHAIN_CONTEXT_MISSING", 0) end
-local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
-local LocalPlayer = Players.LocalPlayer
-
--- Display an opaque local reference rather than exposing a human-readable
--- client-side check reason in Roblox's error prompt.
-local function makeKickCode(reason)
-    local text = tostring(reason or "unknown")
-    local hash = 5381
-    for index = 1, #text do
-        hash = (hash * 33 + text:byte(index) + index) % 2147483647
-    end
-    return string.format("MS9-%08X", hash)
-end
-
-local function patchErrorPrompt(code)
-    local success, changed = pcall(function()
-        local root = CoreGui:FindFirstChild("RobloxPromptGui")
-        local overlay = root and root:FindFirstChild("promptOverlay")
-        local prompt = overlay and overlay:FindFirstChild("ErrorPrompt")
-        local titleFrame = prompt and prompt:FindFirstChild("TitleFrame")
-        local title = titleFrame and titleFrame:FindFirstChild("ErrorTitle")
-        local messageArea = prompt and prompt:FindFirstChild("MessageArea")
-        local errorFrame = messageArea and messageArea:FindFirstChild("ErrorFrame")
-        local label = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
-        if not title or not label then return false end
-        title.Text = "[999MS]"
-        label.Text = "Session terminated.\nReference: " .. code
-        return true
-    end)
-    return success and changed
-end
-
-local function Kick(reason)
-    local code = makeKickCode(reason)
-    pcall(function()
-        CoreGui.ChildAdded:Connect(function(child)
-            if child.Name == "RobloxPromptGui" then
-                task.spawn(function()
-                    task.wait(0.01)
-                    patchErrorPrompt(code)
-                end)
-            end
-        end)
-    end)
-    task.spawn(function()
-        for _ = 1, 50 do
-            if patchErrorPrompt(code) then break end
-            task.wait(0.01)
-        end
-    end)
-    -- Best-effort executor signal trigger requested for compatible executors.
-    -- It is not a portable disconnect primitive, so LocalPlayer:Kick remains
-    -- the fail-closed fallback that actually enforces the disconnect.
-    pcall(function()
-        if type(replicatesignal) == "function" and LocalPlayer.StatsAvailable then
-            replicatesignal(LocalPlayer.StatsAvailable, "Kick")
-        end
-    end)
-    return LocalPlayer:Kick(code)
+local function Abort(reason)
+    local stop = type(ctx) == "table" and ctx.stopChecks or nil
+    if type(stop) == "function" then pcall(stop) end
+    local message = "[999MS] " .. tostring(reason or "stage aborted")
+    if type(warn) == "function" then warn(message) else print(message) end
+    return false
 end
 
 local BASE_URL = "@BASE_URL@"
@@ -89,7 +35,7 @@ local function isCopy(text)
     return true
 end
 local CHAIN_VERSION = "999MS-chain-v1"
-local CHAIN_TTL = 20
+local CHAIN_TTL = 60
 
 local chain = ctx.chain
 local chainId = type(chain) == "table" and chain.Id or nil
@@ -107,7 +53,7 @@ local function chainIs(stage, maxAge)
 end
 
 if not chainIs("stage1", CHAIN_TTL) then
-    return Kick("[999MS] Chain rejected: run loadc.lua")
+    return Abort("[999MS] Chain rejected: run loadc.lua")
 end
 
 local RealListFiles = listfiles
@@ -116,146 +62,127 @@ local RealIsFile = isfile
 local RealDelfile = delfile
 
 local function removeMarkedFiles()
+    -- Do a shallow, bounded scan only. The old recursive walk over every
+    -- executor directory could stall desktop clients on large file trees.
     if type(RealListFiles) ~= "function" or type(RealReadFile) ~= "function"
-        or type(RealDelfile) ~= "function" then
+        or type(RealIsFile) ~= "function" then
         return false
     end
 
-    -- Trace how this build was copied; either half is enough to match.
-    local pending = { "." }
-    local seen = {}
+    local listed, entries = pcall(RealListFiles, ".")
+    if not listed or type(entries) ~= "table" then return false end
     local matches = {}
-
-    while #pending > 0 do
-        local folder = table.remove(pending)
-        if not seen[folder] then
-            seen[folder] = true
-            local listed, entries = pcall(RealListFiles, folder)
-            if listed and type(entries) == "table" then
-                for _, entry in ipairs(entries) do
-                    if not seen[entry] then
-                        local fileCheck, isFile = false, false
-                        if type(RealIsFile) == "function" then
-                            fileCheck, isFile = pcall(RealIsFile, entry)
-                        end
-
-                        local readOk, content = false, nil
-                        if not fileCheck or isFile then
-                            readOk, content = pcall(RealReadFile, entry)
-                            if readOk and isCopy(content) then
-                                table.insert(matches, entry)
-                            end
-                        end
-
-                        if not isFile and not readOk then
-                            table.insert(pending, entry)
-                        end
-                    end
+    local limit = math.min(#entries, 64)
+    for index = 1, limit do
+        local path = entries[index]
+        if type(path) == "string" then
+            local fileOk, isFile = pcall(RealIsFile, path)
+            if fileOk and isFile then
+                local readOk, content = pcall(RealReadFile, path)
+                if readOk and isCopy(content) then
+                    matches[#matches + 1] = path
                 end
             end
         end
     end
 
-    if #matches == 0 then return false end
-
-    for _, path in ipairs(matches) do
-        pcall(RealDelfile, path)
+    if type(RealDelfile) == "function" then
+        for _, path in ipairs(matches) do pcall(RealDelfile, path) end
     end
-    return true
+    return #matches > 0
 end
 
 if removeMarkedFiles() then
-    return Kick("[999MS] Source save detected")
+    return Abort("[999MS] Source save detected")
 end
 
 -- Stage-local signal; this run carries state positionally, not in an executor environment.
-local function createSignal()
-    local handlers = {}
-    local signal = {}
-    function signal:Connect(fn)
-        handlers[#handlers + 1] = fn
-        return { Disconnect = function() end }
-    end
-    function signal:Fire(...)
-        for _, fn in ipairs(handlers) do pcall(fn, ...) end
-    end
-    return signal
+local handlers = {}
+local saved = {}
+function saved:Connect(fn)
+    handlers[#handlers + 1] = fn
+    return { Disconnect = function() end }
 end
-if type(writefile) ~= "function" or type(hookfunction) ~= "function"
-    or type(newcclosure) ~= "function" then
-    return Kick("[999MS] Write monitor unavailable")
+function saved:Fire(...)
+    for _, fn in ipairs(handlers) do pcall(fn, ...) end
 end
-
-local saved = createSignal()
-local target = writefile
+local target = type(writefile) == "function" and writefile or nil
+local packValues = table.pack or function(...) return { n = select("#", ...), ... } end
+local unpackValues = table.unpack or unpack
 local oldWrite
 local saveConnection
 local checksActive = true
+local hookInstalled = false
 
-oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
-    local result = table.pack(pcall(oldWrite, path, contents, ...))
-    local success = result[1] and result[2] ~= false
-
-    if success and checksActive then
-        local copied = isCopy(contents)
-        saved:Fire({
-            api = "writefile",
-            path = tostring(path),
-            bytes = typeof(contents) == "string" and #contents or nil,
-            copied = copied,
-        })
+-- The monitor is best-effort: executors without hookfunction/newcclosure still
+-- run the loader. It only reacts when the written file starts with our marker.
+if target and type(hookfunction) == "function" and type(newcclosure) == "function" then
+    local hookOk, original = pcall(function()
+        return hookfunction(target, newcclosure(function(path, contents, ...)
+            local result = packValues(pcall(oldWrite, path, contents, ...))
+            local success = result[1] and result[2] ~= false
+            if success and checksActive and isCopy(contents) then
+                saved:Fire({ path = tostring(path) })
+            end
+            if not result[1] then error(result[2], 0) end
+            return unpackValues(result, 2, result.n)
+        end))
+    end)
+    if hookOk and type(original) == "function" then
+        oldWrite = original
+        hookInstalled = true
+    else
+        checksActive = false
     end
-
-    if not result[1] then
-        error(result[2], 0)
-    end
-    return table.unpack(result, 2, result.n)
-end))
+else
+    checksActive = false
+end
 
 saveConnection = saved:Connect(function(event)
     if not checksActive then return end
-
+    checksActive = false
+    ctx.sourceSaved = true
     if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
         pcall(function()
-            if RealIsFile(event.path) then
-                RealDelfile(event.path)
-            end
+            if RealIsFile(event.path) then RealDelfile(event.path) end
         end)
     end
-
-    pcall(function()
-        local why = event.copied and "copy" or "write"
-        Kick("[999MS] Source save detected: " .. tostring(event.path) .. " (" .. why .. ")")
-    end)
-    task.wait(0.3)
-    if NfCrash then NfCrash() else while true do end end
+    Abort("source marker written to " .. tostring(event.path))
 end)
 
--- Called by the UI on close and after a successful main-script launch. The
--- hook itself cannot be safely removed across executors, so it is made inert
--- and its signal subscription is disconnected.
 ctx.stopChecks = function()
     checksActive = false
     if saveConnection and type(saveConnection.Disconnect) == "function" then
         pcall(function() saveConnection:Disconnect() end)
     end
+    if hookInstalled and type(oldWrite) == "function" and type(hookfunction) == "function" then
+        pcall(function() hookfunction(target, oldWrite) end)
+        hookInstalled = false
+    end
     ctx.writeMonitor = nil
     ctx.stopChecks = nil
 end
 
--- Stage 3 receives the monitor by the same positional context.
-ctx.writeMonitor = target
+ctx.writeMonitor = hookInstalled and target or nil
+
 
 if not chainIs("stage1", 60) then
-    return Kick("[999MS] Chain interrupted before Stage 3")
+    return Abort("[999MS] Chain interrupted before Stage 3")
 end
 chain.Stage = "stage2"
 chain.UpdatedAt = tick()
 
-local requestFn = (syn and syn.request) or (http and http.request) or request or http_request
-if type(requestFn) ~= "function" then
-    return Kick("[999MS] HTTP not supported")
+local requestCandidates = {
+    type(syn) == "table" and syn.request or false,
+    type(http) == "table" and http.request or false,
+    type(request) == "function" and request or false,
+    type(http_request) == "function" and http_request or false,
+}
+local requestFn
+for _, candidate in ipairs(requestCandidates) do
+    if type(candidate) == "function" then requestFn = candidate; break end
 end
+if not requestFn then return Abort("HTTP request API unavailable") end
 
 -- The server mints the Stage-3 link while serving this stage and writes it
 -- into the header table above; it is valid for ten seconds from that moment.
@@ -264,20 +191,20 @@ local nextNonce = "@NONCE@"
 local nextUrl = gamaramam[1]
 -- "NEXT@" without the leading "@" so this guard is never itself replaced.
 if type(nextUrl) ~= "string" or #nextUrl < 40 or nextUrl:find("NEXT@", 1, true) then
-    return Kick("[999MS] Stage link unavailable")
+    return Abort("[999MS] Stage link unavailable")
 end
 
-local cryptTable = (syn and syn.crypt) or crypt
+local cryptTable = (type(syn) == "table" and syn.crypt) or crypt
 local hasher = type(cryptTable) == "table" and cryptTable.hash or nil
 if type(hasher) ~= "function" then
-    return Kick("[999MS] Loader hash unavailable")
+    return Abort("[999MS] Loader hash unavailable")
 end
 
 -- Same proof the server expects: the link only opens for the stage that ran
 -- before it, never for a plain fetch of the URL.
 local okProof, proof = pcall(hasher, "999MS-fetch-v1|" .. nextNonce .. "|" .. nextUrl, "sha256")
 if not okProof or type(proof) ~= "string" then
-    return Kick("[999MS] Stage proof unavailable")
+    return Abort("[999MS] Stage proof unavailable")
 end
 
 local ok, response = pcall(requestFn, {
@@ -286,22 +213,26 @@ local ok, response = pcall(requestFn, {
     Headers = { ["content-type"] = "application/json" },
     Body = '{"p":"' .. proof .. '"}',
 })
-if not ok or type(response) ~= "table" or response.StatusCode ~= 200 then
-    return Kick("[999MS] Loader fetch failed")
+local status = type(response) == "table" and tonumber(response.StatusCode or response.Status) or nil
+if not ok or type(response) ~= "table" or status ~= 200 then
+    return Abort("[999MS] Loader fetch failed")
 end
 
 local body = response.Body or ""
+if #body > 256 * 1024 then return Abort("[999MS] Loader response too large") end
 local okHash, digest = pcall(hasher, body, "sha256")
 if not okHash or type(digest) ~= "string" or string.lower(digest) ~= nextSha then
-    return Kick("[999MS] Loader integrity check failed")
+    return Abort("[999MS] Loader integrity check failed")
 end
 
-local chunk = loadstring(body)
-if type(chunk) ~= "function" then
-    return Kick("[999MS] Loader compile failed")
+local compiler = loadstring or load
+if type(compiler) ~= "function" then return Abort("Lua compiler API unavailable") end
+local compileOk, chunk = pcall(compiler, body)
+if not compileOk or type(chunk) ~= "function" then
+    return Abort("[999MS] Loader compile failed")
 end
 
 local runOk = pcall(chunk, ctx)
 if not runOk then
-    return Kick("[999MS] Loader runtime error")
+    return Abort("[999MS] Loader runtime error")
 end
