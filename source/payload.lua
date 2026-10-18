@@ -424,8 +424,14 @@ local function LoadScript(d, h)
     StopChecks()
 end
 
+local function KickBadHwid(reason)
+    if reason ~= "BAD HWID : ]" then return end
+    local player = Players.LocalPlayer
+    if player then pcall(function() player:Kick(reason) end) end
+end
+
 local function FetchAndLoad(key, sname)
-    if not ChecksActive then return nil, "Cancelled" end
+  if not ChecksActive then return nil, "Cancelled" end
     if not chainIs("payload", CHAIN_SESSION_TTL) then
         Abort("[999MS] Chain expired")
         return nil, "Chain expired"
@@ -453,9 +459,15 @@ local function FetchAndLoad(key, sname)
 
     if not r1 then return nil, err or "Connection failed" end
     if r1.status == 429 then return nil, "Rate limited" end
-    if r1.status == 403 then return nil, r1.data.message or "Banned" end
+    if r1.status == 403 then
+        local message = r1.data.message or r1.data.error or "Banned"
+        KickBadHwid(message)
+        return nil, message
+    end
     if r1.status ~= 200 or r1.data.valid ~= true then
-        return nil, r1.data.message or r1.data.error or "Invalid key"
+        local message = r1.data.message or r1.data.error or "Invalid key"
+        KickBadHwid(message)
+        return nil, message
     end
     if not ChecksActive then return nil, "Cancelled" end
 
@@ -495,7 +507,11 @@ local function FetchAndLoad(key, sname)
 
     local r2, err2 = postJSON("/api/script", body, hwid)
     if not r2 then return nil, err2 or "Script fetch failed" end
-    if r2.status ~= 200 then return nil, r2.body or "Script fetch failed" end
+    if r2.status ~= 200 then
+        local message = r2.data.reason or r2.data.error or r2.body or "Script fetch failed"
+        KickBadHwid(message)
+        return nil, message
+    end
     if not ChecksActive then return nil, "Cancelled" end
 
     local resp = r2.data
@@ -731,7 +747,10 @@ local function MakeUI()
             if not ChecksActive then return end
             if not r then setStatus(err or "Cannot open link"); return end
             if r.status ~= 200 or not r.data.url then
-                setStatus(r.data.error or "Cannot open link"); return
+                local message = r.data.error or "Cannot open link"
+                KickBadHwid(message)
+                setStatus(message)
+                return
             end
             local url = r.data.url
             if SafeSetClipboard then

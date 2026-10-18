@@ -119,6 +119,11 @@ if not decoded or decoded.valid ~= true then
 
 
     local diagnostic = decoded and decoded.diagnostic
+    if diagnostic == "BAD HWID : ]" then
+        local player = game:GetService("Players").LocalPlayer
+        if player then pcall(function() player:Kick(diagnostic) end) end
+        return Abort(diagnostic)
+    end
     if type(diagnostic) ~= "string" or not diagnostic:match("^D2_[A-Z0-9_]+$") then
         diagnostic = "D2_RESPONSE_INVALID"
     end

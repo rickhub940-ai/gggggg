@@ -181,6 +181,17 @@ const OPAQUE_ACTIONS = Object.freeze({
   v4: 'heartbeat',
   k8: 'start',
 });
+const BAD_HWID_CODE = 'BAD HWID : ]';
+const BAD_DEVICE_REASONS = new Set([
+  'invalid hwid format',
+  'hwid mismatch',
+  'fingerprint required',
+  'invalid fingerprint format',
+  'hwid fingerprint mismatch',
+]);
+function clientDeviceMessage(reason) {
+  return BAD_DEVICE_REASONS.has(reason) ? BAD_HWID_CODE : reason;
+}
 
 function decodeDeviceParts(body = {}) {
   const parts = [body.b, body.c, body.d, body.e, body.f];
@@ -637,7 +648,8 @@ async function handleVerify(req, res, ip) {
   const hwidCheck = hwidFromRequest(req, hwid);
   if (!hwidCheck.ok) {
     noteEvent('verify_reject', hwidCheck.reason + ' | key ' + hashHwid(key).slice(0, 12));
-    return res.status(400).json({ valid: false, error: hwidCheck.reason });
+    const message = clientDeviceMessage(hwidCheck.reason);
+    return res.status(403).json({ valid: false, error: message, message });
   }
   const clientHwid = hwidCheck.hwid;
   const bindingId = hwidCheck.bindingId;
@@ -702,7 +714,7 @@ async function handleScript(req, res, ip) {
 
   const device = deviceMatches(req, payload.hwidHash, req.body?.c ?? req.body?.hwid);
   if (!device.ok)
-    return res.status(403).json({ Valid: false, reason: device.reason });
+    return res.status(403).json({ Valid: false, reason: clientDeviceMessage(device.reason) });
 
   // One-time hop from /api/verify: proves this request follows a real
   // verification instead of replaying a captured ticket.
@@ -835,14 +847,10 @@ async function handleScriptVerify(req, res) {
   // request does not make a retried legitimate request look replayed.
   const device = deviceMatches(req, payload.hwidHash, hwid);
   if (!device.ok) {
-    const categories = {
-      'invalid hwid format': 'D2_HWID_FORMAT',
-      'fingerprint required': 'D2_FINGERPRINT_MISSING',
-      'hwid mismatch': 'D2_HWID_MISMATCH',
-      'hwid fingerprint mismatch': 'D2_HWID_FINGERPRINT_MISMATCH',
-      'device mismatch': 'D2_DEVICE_BINDING_MISMATCH',
-    };
-    return rejectRuntimeVerification(res, 403, categories[device.reason] || 'D2_DEVICE_INVALID');
+    const category = BAD_DEVICE_REASONS.has(device.reason)
+      ? BAD_HWID_CODE
+      : device.reason === 'device mismatch' ? 'D2_DEVICE_BINDING_MISMATCH' : 'D2_DEVICE_INVALID';
+    return rejectRuntimeVerification(res, 403, category);
   }
   const clientHwid = device.hwid;
 
@@ -904,7 +912,7 @@ async function handleHeartbeat(req, res, ip) {
   const device = deviceMatches(req, payload.hwidHash, c ?? hwid);
   if (!device.ok) {
     sessions.delete(payload.jti);
-    return res.status(200).json({ kick: 'Device mismatch' });
+    return res.status(200).json({ kick: clientDeviceMessage(device.reason) });
   }
 
   const reason = checkRevoked({ userId: payload.userId, ip });
@@ -951,7 +959,7 @@ async function handleHeartbeat(req, res, ip) {
 function verifiedScriptContext(ticket, req, hwid, scriptName, ip) {
   if (typeof ticket !== 'string' || ticket.length > 4096) return { error: 'ticket required', status: 400 };
   const device = hwidFromRequest(req, hwid);
-  if (!device.ok) return { error: device.reason, status: 403 };
+  if (!device.ok) return { error: clientDeviceMessage(device.reason), status: 403 };
   const payload = verifyTicket(ticket);
   if (!payload || payload.scope !== 'script') return { error: 'invalid ticket', status: 401 };
   if (!timingSafeStringEquals(payload.hwidHash, hashBindingId(device.bindingId))) return { error: 'device mismatch', status: 403 };
@@ -966,7 +974,7 @@ async function handleStart(req, res, ip) {
   const body = req.body || {};
   const hwid = body.c ?? body.hwid;
   const device = hwidFromRequest(req, hwid);
-  if (!device.ok) return res.status(400).json({ error: device.reason });
+  if (!device.ok) return res.status(403).json({ error: clientDeviceMessage(device.reason) });
 
   const reason = checkRevoked({ hwid: device.hwid, ip });
   if (reason)

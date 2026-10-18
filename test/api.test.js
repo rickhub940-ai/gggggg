@@ -171,8 +171,8 @@ async function main() {
   // `/api/start` uses the same five-part HWID-only Base64 transport.
   const startWithoutHwid = await post('/api/q', { p: 'k8' },
     { 'syn-fingerprint': 'syn-device-01' });
-  assert.equal(startWithoutHwid.status, 400);
-  assert.equal((await startWithoutHwid.json()).error, 'invalid hwid format');
+  assert.equal(startWithoutHwid.status, 403);
+  assert.equal((await startWithoutHwid.json()).error, 'BAD HWID : ]');
   const startWithHwid = await post('/api/q', { p: 'k8', ...deviceParts('Start-HWID') });
   assert.equal(startWithHwid.status, 502,
     'HWID alone reaches Platoboost; empty test provider credentials cause the expected provider failure');
@@ -244,6 +244,15 @@ async function main() {
   assert.equal((await opaqueVerify.json()).error, 'RNG integers rejected',
     'opaque request aliases are decoded before the existing RNG validation');
 
+  const mismatchVerify = await post('/api/q', {
+    p: 'q7', a: 'KEY_TEST', ...deviceParts('api-test-hwid'), u: 'ignored-decoy',
+    g: 'main', h: '7', i: 1.5, j: 1, k: 1, l: 1, m: 1, n: 2,
+  }, { 'X-Other-FINGERPRINT': 'not-api-test-hwid' });
+  assert.equal(mismatchVerify.status, 403);
+  const mismatchVerifyBody = await mismatchVerify.json();
+  assert.equal(mismatchVerifyBody.error, 'BAD HWID : ]');
+  assert.equal(mismatchVerifyBody.message, 'BAD HWID : ]');
+
   // ── ticket flow still works without realtime ──
   const hwid = 'api-test-hwid';
   const ticket = issueTicket({ scope: 'script', hwidHash: bindingHash(hwid), userId: '7', scriptName: 'main' });
@@ -268,14 +277,14 @@ async function main() {
     s: 'y'.repeat(64), t: 'x',
   }, { 'syn-fingerprint': 'different-executor-fingerprint' });
   assert.equal(mismatchRuntime.status, 403);
-  assert.equal((await mismatchRuntime.json()).diagnostic, 'D2_HWID_FINGERPRINT_MISMATCH');
+  assert.equal((await mismatchRuntime.json()).diagnostic, 'BAD HWID : ]');
 
   // Fingerprint is required, but cannot substitute for a missing HWID.
   const fingerprintOnlyRuntime = await post('/api/q', {
     p: 'x9', a: ticket, g: 'main', q: '', s: 'y'.repeat(64), t: 'x',
   }, { 'syn-fingerprint': 'syn-device-01' });
   assert.equal(fingerprintOnlyRuntime.status, 403);
-  assert.equal((await fingerprintOnlyRuntime.json()).diagnostic, 'D2_HWID_FORMAT');
+  assert.equal((await fingerprintOnlyRuntime.json()).diagnostic, 'BAD HWID : ]');
 
   const forgedHop = await post('/api/script-verify', {
     ticket, c: hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
@@ -347,7 +356,7 @@ async function main() {
   assert.ok(payloadSource.includes('local StartupError = ""'), 'UI error text uses its own local');
   assert.equal(payloadSource.includes('local E1 = ""'), false, 'UI error text must not shadow RNG helper E1');
 
-  // ── runner-safe failure handling: abort, never kick or deliberately hang ──
+  // ── runner-safe failures: kick only for the explicit BAD HWID rejection ──
   const loaderSources = [
     fs.readFileSync(path.join(__dirname, '..', 'source', 'loadc.template.lua'), 'utf8'),
     fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8'),
@@ -355,8 +364,12 @@ async function main() {
     payloadSource,
     mainForContext,
   ].join('\n');
-  assert.equal(/:Kick\s*\(|replicatesignal|SecureCrash|NfCrash/.test(loaderSources), false,
-    'client stages must not disconnect a player or use the crash loop');
+  assert.equal((loaderSources.match(/:Kick\s*\(/g) || []).length, 2,
+    'only the payload and final verifier have conditional BAD HWID kick handlers');
+  assert.match(payloadSource, /if reason ~= "BAD HWID : \]" then return end/);
+  assert.match(mainForContext, /diagnostic == "BAD HWID : \]"/);
+  assert.equal(/replicatesignal|SecureCrash|NfCrash/.test(loaderSources), false,
+    'client stages must not use signal replication or crash loops');
   assert.equal(/while\s+true\s+do/.test(loaderSources), false,
     'loader and payload stages must not contain unbounded loops');
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'loader.lua'), 'utf8'),
@@ -389,8 +402,12 @@ async function main() {
   const verifierBody = (mainForContext.match(/local body = \{([\s\S]*?)\n\}/) || [])[1] || '';
   assert.equal(/\b(ticket|hwid|runtimeSecret|scriptToken)\s*=/.test(verifierBody), false,
     'outgoing verifier body uses opaque field names');
+  assert.match(payloadSource, /if reason ~= "BAD HWID : \]" then return end/);
+  assert.match(payloadSource, /player:Kick\(reason\)/);
+  assert.match(mainForContext, /diagnostic == "BAD HWID : \]"/);
+  assert.match(mainForContext, /player:Kick\(diagnostic\)/);
   assert.match(mainForContext, /local function Abort\(reason\)/,
-    'final verification failures use a non-kicking abort');
+    'ordinary verification failures abort without kicking');
 
   // ── client Lua must not carry any realtime code ──
   const mainLua = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
