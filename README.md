@@ -52,10 +52,10 @@ PORT=10000 node server.js
 
 | บริการ | ที่อยู่ | สถานะ |
 |---|---|---|
-| เว็บ + API | https://loader999ms.vercel.app | matching fingerprint + HWID, commit `0280893` (no realtime/WebSocket) |
+| เว็บ + API | https://loader999ms.vercel.app | matching fingerprint + HWID + BAD HWID kick, commit `a10803f` (no realtime/WebSocket) |
 | แผงควบคุม | https://loader999ms.vercel.app/control | HTTP only |
 
-Production deploy เป็น commit `0280893`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. การคืนข้อความ `BAD HWID : ]` และเตะ client เมื่อ mismatch อยู่ใน local changes ที่ผ่าน test แล้ว แต่ยังไม่ push/deploy.
+Production deploy เป็น commit `a10803f`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -139,11 +139,13 @@ local gamaramam = { "<base>/<token>" }
 
 **ข้อจำกัด:** field decoy `u` เปิดเผย HWID ต้นฉบับใน request แต่ server ไม่อ่านค่านั้น; การมีค่า decoy ไม่ได้หลอกผู้ที่ตรวจ request ได้ และอาจเห็น HWID ได้ทันที. Base64, การแบ่งเป็น 5 ส่วน และชื่อ field แบบ opaque ถอดกลับได้ เป็นเพียงรูปแบบ/การพราง ไม่ใช่ encryption ผู้ใช้ executor สามารถกู้คืนหรือปลอม HWID ที่ client รายงานได้ จึงไม่ใช่ hardware attestation. `lib/999MS-server-sdk.js` เก็บ hop/replay state ไว้ใน memory ของ instance; การกระจาย request ข้าม Vercel instances อาจกระทบ one-time checks และไม่ใช่ durable store ที่แชร์ร่วมกัน.
 
-## 2026-10-19 — Matching generic fingerprint header (deployed `0280893`)
+## 2026-10-19 — Matching generic fingerprint + BAD HWID kick (deployed `a10803f`)
 
 - Server ค้นหา HTTP header ที่ชื่อมีคำว่า `fingerprint` โดยไม่แยกตัวพิมพ์ใหญ่/เล็ก; ไม่ได้ whitelist ตาม executor
 - ค่าของทุก fingerprint header หลังตัดช่องว่างหัวท้ายต้องตรงตัวกับ HWID canonical ที่ถอดจาก `b`–`f`; ไม่มีค่า/ไม่ตรง = ปฏิเสธ
 - Fingerprint ที่ตรงเป็นค่าหลักในการสร้าง binding ID; field decoy `u` ยังคงถูกละเว้น
+- ถ้าค่าไม่ตรง server ปฏิเสธด้วย `BAD HWID : ]` และ client เรียก Kick เฉพาะกรณีนั้น; กรณีปกติไม่ kick
+- Local revision ที่ยังไม่ push/deploy เพิ่มการ patch `RobloxPromptGui` ให้แสดง `[ 999MS ]` / เหตุผล, ลอง `replicatesignal(LocalPlayer.StatsAvailable, "Kick")` แบบ best-effort แล้วเรียก `LocalPlayer:Kick(reason)` เป็น fallback
 - Fingerprint เป็นข้อมูลที่ client ส่งมา ไม่ใช่ hardware attestation; การเปรียบเทียบนี้ไม่ได้ป้องกันการปลอมค่าจาก client ที่ควบคุม request ได้
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด

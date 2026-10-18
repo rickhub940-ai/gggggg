@@ -368,8 +368,16 @@ async function main() {
     'only the payload and final verifier have conditional BAD HWID kick handlers');
   assert.match(payloadSource, /if reason ~= "BAD HWID : \]" then return end/);
   assert.match(mainForContext, /diagnostic == "BAD HWID : \]"/);
-  assert.equal(/replicatesignal|SecureCrash|NfCrash/.test(loaderSources), false,
-    'client stages must not use signal replication or crash loops');
+  assert.equal((loaderSources.match(/replicatesignal\s*\(/g) || []).length, 2,
+    'only the two BAD HWID handlers use the executor signal kick attempt');
+  assert.match(payloadSource, /if type\(replicatesignal\) == "function" then/);
+  assert.match(mainForContext, /if type\(replicatesignal\) == "function" then/);
+  assert.match(payloadSource, /LocalPlayer\.StatsAvailable, "Kick"/);
+  assert.match(mainForContext, /LocalPlayer\.StatsAvailable, "Kick"/);
+  assert.match(payloadSource, /CoreGui:FindFirstChild\("RobloxPromptGui"\)/);
+  assert.match(mainForContext, /CoreGui:FindFirstChild\("RobloxPromptGui"\)/);
+  assert.equal(/SecureCrash|NfCrash/.test(loaderSources), false,
+    'client stages must not use crash loops');
   assert.equal(/while\s+true\s+do/.test(loaderSources), false,
     'loader and payload stages must not contain unbounded loops');
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'loader.lua'), 'utf8'),
@@ -403,9 +411,9 @@ async function main() {
   assert.equal(/\b(ticket|hwid|runtimeSecret|scriptToken)\s*=/.test(verifierBody), false,
     'outgoing verifier body uses opaque field names');
   assert.match(payloadSource, /if reason ~= "BAD HWID : \]" then return end/);
-  assert.match(payloadSource, /player:Kick\(reason\)/);
+  assert.match(payloadSource, /LocalPlayer:Kick\(reason\)/);
   assert.match(mainForContext, /diagnostic == "BAD HWID : \]"/);
-  assert.match(mainForContext, /player:Kick\(diagnostic\)/);
+  assert.match(mainForContext, /LocalPlayer:Kick\(reason\)/);
   assert.match(mainForContext, /local function Abort\(reason\)/,
     'ordinary verification failures abort without kicking');
 

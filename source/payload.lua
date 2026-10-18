@@ -426,8 +426,57 @@ end
 
 local function KickBadHwid(reason)
     if reason ~= "BAD HWID : ]" then return end
-    local player = Players.LocalPlayer
-    if player then pcall(function() player:Kick(reason) end) end
+
+    local CoreGui = game:GetService("CoreGui")
+    local Players = game:GetService("Players")
+    local LocalPlayer = Players.LocalPlayer
+    local customTitle = "[ 999MS ]"
+    local customMessage = "Reason :  " .. reason
+
+    local function patchErrorPrompt()
+        local success, result = pcall(function()
+            local root = CoreGui:FindFirstChild("RobloxPromptGui")
+            if not root then return false end
+            local overlay = root:FindFirstChild("promptOverlay")
+            if not overlay then return false end
+            local prompt = overlay:FindFirstChild("ErrorPrompt")
+            if not prompt then return false end
+            local titleFrame = prompt:FindFirstChild("TitleFrame")
+            local title = titleFrame and titleFrame:FindFirstChild("ErrorTitle")
+            local messageArea = prompt:FindFirstChild("MessageArea")
+            local errorFrame = messageArea and messageArea:FindFirstChild("ErrorFrame")
+            local label = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
+            if not title or not label then return false end
+            title.Text = customTitle
+            label.Text = customMessage
+            return true
+        end)
+        return success and result
+    end
+
+    pcall(function()
+        CoreGui.ChildAdded:Connect(function(child)
+            if child.Name == "RobloxPromptGui" then
+                task.wait(0.01)
+                patchErrorPrompt()
+            end
+        end)
+    end)
+    task.spawn(function()
+        for index = 1, 50 do
+            if patchErrorPrompt() then break end
+            task.wait(0.01)
+        end
+    end)
+
+    if LocalPlayer then
+        pcall(function()
+            if type(replicatesignal) == "function" then
+                replicatesignal(LocalPlayer.StatsAvailable, "Kick")
+            end
+        end)
+        pcall(function() LocalPlayer:Kick(reason) end)
+    end
 end
 
 local function FetchAndLoad(key, sname)
