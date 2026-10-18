@@ -55,7 +55,7 @@ PORT=10000 node server.js
 | เว็บ + API | https://loader999ms.vercel.app | latest confirmed: `7e05ddf` (opaque request fields; no realtime/WebSocket) |
 | แผงควบคุม | https://loader999ms.vercel.app/control | HTTP only |
 
-การเปลี่ยน HWID-only แบบ 5 ส่วน Base64 ในหัวข้อล่างยังเป็น **working tree เท่านั้น** — ยังไม่ผ่าน test, commit, push หรือ deploy; production ยังใช้ composite HWID+fingerprint จาก `7e05ddf`.
+การเปลี่ยน HWID-only แบบ 5 ส่วน Base64 ผ่าน test ในเครื่องและ commit แล้ว (`f5b88c4`) แต่ยังไม่ push/deploy; production ล่าสุดที่ยืนยันได้ยังเป็น composite HWID+fingerprint จาก `7e05ddf`.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -127,7 +127,7 @@ local gamaramam = { "<base>/<token>" }
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
 
-## 2026-10-18 — HWID-only binding, 5 Base64 request parts (working tree)
+## 2026-10-18 — HWID-only binding, 5 Base64 request parts (local commit; pending deploy)
 
 - Platoboost ยังเป็นผู้ตรวจสอบคีย์และอุปกรณ์ ไม่มีการเพิ่มฐานข้อมูลคีย์แยก
 - Client อ่าน HWID ผ่าน `gethwid()`, `get_exwid()` และ aliases ที่รองรับ; ถ้า getter ใช้ไม่ได้จะหยุด และไม่ fallback ไป `GetClientId()` ของ Roblox
