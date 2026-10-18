@@ -205,6 +205,9 @@ async function main() {
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'loader.lua'), 'utf8'), /pcall\(fn, ctx\)/);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'payload.lua'), 'utf8'), /HttpRequest, Chain, ctx\)/);
   assert.match(mainForContext, /local Context = K[\s\S]*Context\.chain == Chain/);
+  const payloadSource = fs.readFileSync(path.join(__dirname, '..', 'source', 'payload.lua'), 'utf8');
+  assert.ok(payloadSource.includes('local StartupError = ""'), 'UI error text uses its own local');
+  assert.equal(payloadSource.includes('local E1 = ""'), false, 'UI error text must not shadow RNG helper E1');
 
   // ── client Lua must not carry any realtime code ──
   const mainLua = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');

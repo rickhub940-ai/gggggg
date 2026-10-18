@@ -190,7 +190,7 @@ print("[999MS] Payload L1-L6 passed")
 local SCRIPT_NAME = ctx.scriptName or "main"
 local SCRIPT_NAME_LOCKED = SCRIPT_NAME
 local USER_KEY = type(ctx.key) == "string" and ctx.key or ""
-local E1 = ""
+local StartupError = ""
 -- The key arrived as a local positional argument; discard it from the context
 -- as soon as this stage has captured its private copy.
 ctx.key = nil
@@ -1072,7 +1072,7 @@ local function MakeUI()
         status.Text = type(msg) == "string" and msg or ""
         status.TextColor3 = color or Color3.fromRGB(255, 100, 100)
     end
-    if E1 ~= "" then setStatus(E1) end
+    if StartupError ~= "" then setStatus(StartupError) end
     local function setBusy(isBusy)
         busy = isBusy
         btn.Text = isBusy and "Checking..." or "Verify Key"
@@ -1134,8 +1134,8 @@ end
 task.spawn(function()
     local decrypted, result = FetchAndLoad(USER_KEY, SCRIPT_NAME_LOCKED)
     if not decrypted then
-        E1 = result or "Invalid key"
-        print("[999MS] Auto-load failed:", E1)
+        StartupError = result or "Invalid key"
+        print("[999MS] Auto-load failed:", StartupError)
         MakeUI()
         return
     end
