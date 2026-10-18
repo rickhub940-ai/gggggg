@@ -7,6 +7,8 @@ local gamaramam = {
     "@NEXT@"
 }
 -- ═══ BODY ═══ everything below is compacted at build time.
+local ctx = ...
+if type(ctx) ~= "table" then error("MS999:CHAIN_CONTEXT_MISSING", 0) end
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
@@ -87,11 +89,10 @@ end
 local CHAIN_VERSION = "999MS-chain-v1"
 local CHAIN_TTL = 20
 
-local env = getgenv()
-local chain = env.MS999Chain
+local chain = ctx.chain
 local chainId = type(chain) == "table" and chain.Id or nil
 local function chainIs(stage, maxAge)
-    local current = env.MS999Chain
+    local current = ctx.chain
     return current == chain
         and type(current) == "table"
         and current.Version == CHAIN_VERSION
@@ -165,28 +166,35 @@ if removeMarkedFiles() then
     return Kick("[999MS] Source save detected")
 end
 
--- Use the same Signal.new + hookfunction write detector as X.lua for files
--- created after this stage has started.
-if type(env.Signal) ~= "table" or type(env.Signal.new) ~= "function" then
-    return Kick("[999MS] Signal.new unavailable")
+-- Stage-local signal; this run carries state positionally, not in an executor environment.
+local function createSignal()
+    local handlers = {}
+    local signal = {}
+    function signal:Connect(fn)
+        handlers[#handlers + 1] = fn
+        return { Disconnect = function() end }
+    end
+    function signal:Fire(...)
+        for _, fn in ipairs(handlers) do pcall(fn, ...) end
+    end
+    return signal
 end
-if type(env.writefile) ~= "function" or type(hookfunction) ~= "function"
+if type(writefile) ~= "function" or type(hookfunction) ~= "function"
     or type(newcclosure) ~= "function" then
     return Kick("[999MS] Write monitor unavailable")
 end
 
-local saved = env.Signal.new()
-local target = env.writefile
+local saved = createSignal()
+local target = writefile
 local oldWrite
 local saveConnection
-
-env.MS999ChecksActive = true
+local checksActive = true
 
 oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
     local result = table.pack(pcall(oldWrite, path, contents, ...))
     local success = result[1] and result[2] ~= false
 
-    if success and env.MS999ChecksActive ~= false then
+    if success and checksActive then
         local copied = isCopy(contents)
         saved:Fire({
             api = "writefile",
@@ -203,7 +211,7 @@ oldWrite = hookfunction(target, newcclosure(function(path, contents, ...)
 end))
 
 saveConnection = saved:Connect(function(event)
-    if env.MS999ChecksActive == false then return end
+    if not checksActive then return end
 
     if type(RealIsFile) == "function" and type(RealDelfile) == "function" then
         pcall(function()
@@ -224,17 +232,17 @@ end)
 -- Called by the UI on close and after a successful main-script launch. The
 -- hook itself cannot be safely removed across executors, so it is made inert
 -- and its signal subscription is disconnected.
-env.MS999StopChecks = function()
-    env.MS999ChecksActive = false
+ctx.stopChecks = function()
+    checksActive = false
     if saveConnection and type(saveConnection.Disconnect) == "function" then
         pcall(function() saveConnection:Disconnect() end)
     end
-    env.MS999WriteMonitor = nil
-    env.MS999StopChecks = nil
+    ctx.writeMonitor = nil
+    ctx.stopChecks = nil
 end
 
--- Stage 3 recognizes this stage-owned writefile hook as trusted.
-env.MS999WriteMonitor = target
+-- Stage 3 receives the monitor by the same positional context.
+ctx.writeMonitor = target
 
 if not chainIs("stage1", 60) then
     return Kick("[999MS] Chain interrupted before Stage 3")
@@ -257,7 +265,7 @@ if type(nextUrl) ~= "string" or #nextUrl < 40 or nextUrl:find("NEXT@", 1, true) 
     return Kick("[999MS] Stage link unavailable")
 end
 
-local cryptTable = (env and env.crypt) or crypt
+local cryptTable = (syn and syn.crypt) or crypt
 local hasher = type(cryptTable) == "table" and cryptTable.hash or nil
 if type(hasher) ~= "function" then
     return Kick("[999MS] Loader hash unavailable")
@@ -291,7 +299,7 @@ if type(chunk) ~= "function" then
     return Kick("[999MS] Loader compile failed")
 end
 
-local runOk = pcall(chunk)
+local runOk = pcall(chunk, ctx)
 if not runOk then
     return Kick("[999MS] Loader runtime error")
 end

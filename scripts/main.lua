@@ -69,11 +69,11 @@ local CHAIN_VERSION = "999MS-chain-v1"
 local A, B, C, D, E, F, G, H, I, J, K = ...
 
 if A ~= true then return Kick("[999MS] Must run via loader") end
-local ChainEnv = K
+local Context = K
 local Chain = J
-if type(ChainEnv) ~= "table"
+if type(Context) ~= "table"
     or type(Chain) ~= "table"
-    or ChainEnv.MS999Chain ~= Chain
+    or Context.chain ~= Chain
     or Chain.Version ~= CHAIN_VERSION
     or type(Chain.Id) ~= "string"
     or Chain.Stage ~= "script"
@@ -144,6 +144,6 @@ if not decoded or decoded.valid ~= true then
     end
     return Kick("[999MS] " .. diagnostic)
 end
-if ChainEnv.MS999Chain == Chain then
-    ChainEnv.MS999Chain = nil
+if Context.chain == Chain then
+    Context.chain = nil
 end

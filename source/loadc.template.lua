@@ -1,72 +1,68 @@
--- 999MS Stage 1. One freshly minted link per run, valid for 10 seconds.
+-- 999MS Stage 1. Receives the caller's values as positional locals.
+local key, scriptName = ...
+if type(key) ~= "string" then key = "" end
+if type(scriptName) ~= "string" or #scriptName < 1 or #scriptName > 64
+    or not scriptName:match("^[%w_%-]+$") then
+    scriptName = "main"
+end
+if scriptName == "Main" then scriptName = "main" end
+
 if not game:IsLoaded() then game.Loaded:Wait() end
 
-local LINK = "__STAGE2_TOKEN__"
-local STAGE2_URL = "__BASE_URL__" .. "/" .. LINK
-local STAGE2_SHA256 = "__STAGE2_SHA256__"
-local STAGE2_NONCE = "__STAGE2_NONCE__"
-
-local env = (getgenv and getgenv()) or _G
-env.MS999Chain = nil
-env.MS999Chain = {
-    Version = "999MS-chain-v1",
-    Id = LINK:match("^(%x+)") or LINK,
-    Stage = "stage1",
-    UpdatedAt = tick(),
+local link = "__STAGE2_TOKEN__"
+local url = "__BASE_URL__" .. "/" .. link
+local sha = "__STAGE2_SHA256__"
+local nonce = "__STAGE2_NONCE__"
+local ctx = {
+    key = key,
+    scriptName = scriptName,
+    chain = {
+        Version = "999MS-chain-v1",
+        Id = link:match("^(%x+)") or link,
+        Stage = "stage1",
+        UpdatedAt = tick(),
+    },
 }
 
--- Stage 2 asks the server for its own Stage-3 link; give it this run's token.
-env.MS999Link = LINK
-
-local cryptTable = (env and env.crypt) or crypt
-local hasher = type(cryptTable) == "table" and cryptTable.hash or nil
+local crypto = (syn and syn.crypt) or crypt
+local hasher = type(crypto) == "table" and crypto.hash or nil
 if type(hasher) ~= "function" then
-    env.MS999Chain = nil
     error("MS999:S1:E04:LOADER_UNAVAILABLE", 0)
 end
 
--- The next stage only opens for a POST that carries this run's proof, so a
--- plain game:HttpGet of the link returns the trap instead of the body.
 local requestFn = (syn and syn.request) or (http and http.request) or request or http_request
 if type(requestFn) ~= "function" then
-    env.MS999Chain = nil
     error("MS999:S1:E06:HTTP_REQUEST_UNAVAILABLE", 0)
 end
 
-local okProof, proof = pcall(hasher, "999MS-fetch-v1|" .. STAGE2_NONCE .. "|" .. STAGE2_URL, "sha256")
+local okProof, proof = pcall(hasher, "999MS-fetch-v1|" .. nonce .. "|" .. url, "sha256")
 if not okProof or type(proof) ~= "string" then
-    env.MS999Chain = nil
     error("MS999:S1:E07:PROOF_FAILED", 0)
 end
 
 local okGet, response = pcall(requestFn, {
-    Url = STAGE2_URL,
+    Url = url,
     Method = "POST",
     Headers = { ["content-type"] = "application/json" },
     Body = '{"p":"' .. proof .. '"}',
 })
 local body = type(response) == "table" and response.Body or nil
 if not okGet or type(body) ~= "string" or body == "" then
-    env.MS999Chain = nil
     error("MS999:S1:E02:HTTP_GET_FAILED", 0)
 end
 
 local okHash, digest = pcall(hasher, body, "sha256")
-if not okHash or type(digest) ~= "string" or string.lower(digest) ~= STAGE2_SHA256 then
-    env.MS999Chain = nil
+if not okHash or type(digest) ~= "string" or string.lower(digest) ~= sha then
     error("MS999:S1:E03:SHA256_MISMATCH", 0)
 end
 
-local loader = loadstring or load
-if type(loader) ~= "function" then
-    env.MS999Chain = nil
+local compiler = loadstring or load
+if type(compiler) ~= "function" then
     error("MS999:S1:E04:LOADER_UNAVAILABLE", 0)
 end
-
-local okCompile, chunk = pcall(loader, body)
+local okCompile, chunk = pcall(compiler, body)
 if not okCompile or type(chunk) ~= "function" then
-    env.MS999Chain = nil
     error("MS999:S1:E05:STAGE2_COMPILE_FAILED", 0)
 end
 
-return chunk()
+return chunk(ctx)

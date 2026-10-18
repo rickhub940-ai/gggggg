@@ -35,7 +35,7 @@ const ARTIFACT_FILES = Object.freeze({
   payload: 'payload.lua',
   sdk: '999MS-sdk.lua',
 });
-const STAGE_TWO_RAW_SHA256 = '4a85c6abc8c4543c643f3a8a65ab789d218b6a8a725ad2530fc2f90eb389a9d9';
+const STAGE_TWO_RAW_SHA256 = 'c9cbf73d4c27283e645d1fb00a48a50d835864b574642c77d02661804dc420f5';
 
 // ═══ Rate limit ═══
 const rateLimit = new Map();
@@ -244,7 +244,7 @@ async function handleLinkCreate(req, res) {
     id: link.linkId(linkPath),
     path: `/x/${linkPath}`,
     url,
-    line: `loadstring(game:HttpGet("${url}"))()`,
+    line: `local key = ""\nlocal script = ${JSON.stringify(scriptName)}\nloadstring(game:HttpGet("${url}"))(key, script)`,
     sha256: digest,
     scriptName,
     expiresAt,
@@ -413,19 +413,10 @@ function readArtifact(name) {
   return body;
 }
 
-// Roblox exposes a non-string `script` object in many executor environments.
-// The legacy Stage-3 loader treated that object as a user script selection and
-// kicked before its normal flow. Normalize only missing/invalid values; a
-// valid caller-provided script name remains untouched.
-const LOADER_SCRIPT_NORMALIZER = 'local e=getgenv();local s=e.script;if type(s)~="string"or#s<1 or#s>64 or not s:match("^[%w_%-]+$")then e.script="main"end;';
-
 function renderLoaderArtifact() {
-  const artifact = readArtifact('loader');
-  // The header table stays the first thing in the file, so every stage of the
-  // chain opens with the same readable `local gamaramam = { … }` line.
-  const head = artifact.indexOf('};');
-  if (head < 0) return `${LOADER_SCRIPT_NORMALIZER}${artifact}`;
-  return `${artifact.slice(0, head + 2)}${LOADER_SCRIPT_NORMALIZER}${artifact.slice(head + 2)}`;
+  // Stage 3 receives the per-run context as a positional local argument. Keep
+  // the readable marker at byte zero; no environment normalizer is injected.
+  return readArtifact('loader');
 }
 
 // ═══ Stage rendering ═══

@@ -107,6 +107,18 @@ https://<host>/x/<40 hex สุ่ม>?at=<exp base36>.<sig 32 ตัว>
 - `LINK_SECRET` = ค่าสุ่มยาว 64 hex (ตั้งใน Vercel production แล้ว) ถ้าไม่มีจะใช้ `TICKET_SECRET`
 - แผง `/control` มีการ์ด **สร้างลิงก์โหลด** + ปุ่มคัดลอก (ลิงก์ / บรรทัด executor / สคริปต์เต็ม)
 
+### ส่ง key และชื่อสคริปต์แบบ positional (2026-10-18)
+
+ไม่ใช้ `getgenv()` หรือ `_G` เป็นที่เก็บสถานะระหว่าง stage แล้ว ตัว entry รับค่าเป็นอาร์กิวเมนต์ และส่งต่อผ่าน context แบบ local จนถึง payload/main:
+
+```lua
+local key = "ABC"
+local script = "Main"
+loadstring(game:HttpGet("https://example.com/<generated-link>"))(key, script)
+```
+
+บรรทัดที่สร้างจาก `/control` จะใส่ `key = ""` ให้แก้เป็นคีย์จริง และตั้งชื่อสคริปต์ตามลิงก์ที่เลือกไว้ การแก้ source แล้วสร้าง artifacts ใหม่ให้ใช้ `node source/build.js` จากนั้นรัน `npm test`.
+
 ## 2026-10-17 — marker ตรวจการเซฟซอร์สเป็นค่าสุ่มยาว
 
 เดิม `source/savecheck.lua` (Stage 2) ฝัง `-- supper_Boom` ไว้ 2 ที่ (บรรทัดแรก + สตริงที่ใช้สแกน)

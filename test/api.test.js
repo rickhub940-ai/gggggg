@@ -184,6 +184,7 @@ async function main() {
   for (const file of ['loada', 'loader', 'payload']) {
     const body = fs.readFileSync(path.join(__dirname, '..', 'artifacts', file + '.lua'), 'utf8');
     assert.equal(/WeAreDevs|obfuscate/i.test(body), false, file + ' must stay readable');
+    assert.equal(/getgenv|_G\\s*\\./i.test(body), false, file + ' must not use executor-global context');
     assert.ok(body.includes('local '), file + ' keeps plain Lua statements');
   }
   // Without a token the stage routes fall through to the trap.
@@ -191,6 +192,19 @@ async function main() {
     const res = await fetch(`http://127.0.0.1:${port}/${file}.lua`, { redirect: 'manual' });
     assert.notEqual(res.status, 200, file + ' must require a run link');
   }
+
+  // ── loader chain must not use executor-global storage ──
+  for (const file of ['loadc.template.lua', 'savecheck.lua', 'loader.lua', 'payload.lua']) {
+    const body = fs.readFileSync(path.join(__dirname, '..', 'source', file), 'utf8');
+    assert.equal(/getgenv|_G\s*\./i.test(body), false, file + ' must use explicit local context');
+  }
+  const mainForContext = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
+  assert.equal(/getgenv|_G\s*\./i.test(mainForContext), false, 'main.lua must not use executor-global context');
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'loadc.template.lua'), 'utf8'), /return chunk\(ctx\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8'), /pcall\(chunk, ctx\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'loader.lua'), 'utf8'), /pcall\(fn, ctx\)/);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'payload.lua'), 'utf8'), /HttpRequest, Chain, ctx\)/);
+  assert.match(mainForContext, /local Context = K[\s\S]*Context\.chain == Chain/);
 
   // ── client Lua must not carry any realtime code ──
   const mainLua = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'main.lua'), 'utf8');
@@ -207,7 +221,10 @@ async function main() {
   assert.equal(linkBody.ok, true);
   assert.match(linkBody.path, /^\/x\/[a-f0-9]{40}$/, 'link path must be 40 random hex');
   assert.match(linkBody.url, /^http[^?]+\/x\/[a-f0-9]{40}\?at=[0-9a-z]+\.[A-Za-z0-9_-]{32}$/);
-  assert.match(linkBody.line, /^loadstring\(game:HttpGet\("/);
+  assert.ok(linkBody.line.startsWith('local key = ""\nlocal script = "main"\n'));
+  assert.match(linkBody.line, /loadstring\(game:HttpGet\("/);
+  assert.match(linkBody.line, /\)\(key, script\)$/);
+  assert.match(linkBody.stub, /local key = \"\"[\s\S]*local script = \"main\"[\s\S]*chunk\(key, script\)/);
   assert.match(linkBody.sha256, /^[a-f0-9]{64}$/);
   assert.ok(linkBody.stub.includes(linkBody.url), 'stub carries the link');
   assert.ok(linkBody.stub.includes(linkBody.sha256), 'stub pins the hash');
@@ -222,6 +239,7 @@ async function main() {
   assert.equal(crypto.createHash('sha256').update(entry).digest('hex'), linkBody.sha256,
     'served entry must hash to the pinned value');
   assert.ok(entry.includes('/loadc.lua'), 'entry hands over to the chain');
+  assert.ok(entry.includes('chunk(key, scriptName)'), 'entry forwards positional key and script values');
 
   const tampered = await fetch(`http://127.0.0.1:${port}${linkBody.path}?at=${'0'.repeat(8)}.${'a'.repeat(32)}`, {
     redirect: 'manual',

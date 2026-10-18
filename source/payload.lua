@@ -71,15 +71,12 @@ local CHAIN_VERSION = "999MS-chain-v1"
 local CHAIN_TTL = 20
 local CHAIN_SESSION_TTL = 30 * 60
 
-local G0 = getgenv
-if type(G0) ~= "function" then return Kick("[999MS] Environment unavailable") end
-local E0 = G0()
-if type(E0) ~= "table" then return Kick("[999MS] Environment invalid") end
-local ChainEnv = E0
-local Chain = ChainEnv.MS999Chain
+local ctx = ...
+if type(ctx) ~= "table" then return Kick("[999MS] Context missing") end
+local Chain = ctx.chain
 local ChainId = type(Chain) == "table" and Chain.Id or nil
 local function chainIs(stage, maxAge)
-    local current = ChainEnv.MS999Chain
+    local current = ctx.chain
     return current == Chain
         and type(current) == "table"
         and current.Version == CHAIN_VERSION
@@ -96,9 +93,9 @@ if not chainIs("loader", CHAIN_TTL) then
 end
 
 -- ═══ L1-L3: Loader Proof ═══
-local LoaderProof = E0.MS999LoaderProof
-local LoaderTime = E0.MS999LoaderTime
-local LoaderMarker = E0.MS999LoaderMarker
+local LoaderProof = ctx.loaderProof
+local LoaderTime = ctx.loaderTime
+local LoaderMarker = ctx.loaderMarker
 
 if type(LoaderProof) ~= "string" then
     return Kick("[999MS] L1: Not run via loader")
@@ -119,17 +116,17 @@ Chain.Stage = "payload"
 Chain.UpdatedAt = tick()
 
 -- ═══ Signal bus ═══
-local MS999Signal = E0.MS999Signal
+local MS999Signal = ctx.signal
 if type(MS999Signal) ~= "table" then
     return Kick("[999MS] Signal bus missing")
 end
 
 -- ═══ Capture real ═══
--- Stage 2 may expose its trusted write monitor through E0 while the
--- executor's global writefile alias is a different reference. Prefer the
--- Stage-2 reference so a normal executor alias split is not a false positive.
-local Stage2WriteMonitor = E0.MS999WriteMonitor
-local RealWriteFile = type(Stage2WriteMonitor) == "function" and Stage2WriteMonitor or writefile
+-- Stage 2 passes its trusted write monitor through the local context. Prefer
+-- that reference so an executor alias split is not a false positive.
+local Stage2WriteMonitor = ctx.writeMonitor
+local RealGlobalWriteFile = writefile
+local RealWriteFile = type(Stage2WriteMonitor) == "function" and Stage2WriteMonitor or RealGlobalWriteFile
 local RealIsHooked = isfunctionhooked
 local RealDebugGetInfo = debug.getinfo
 local RealHookFunction = hookfunction
@@ -145,7 +142,7 @@ if type(RealWriteFile) == "function" then
     end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, RealWriteFile)
-        local stageTwoMonitor = E0.MS999WriteMonitor
+        local stageTwoMonitor = ctx.writeMonitor
         if ok and hooked and stageTwoMonitor ~= RealWriteFile then
             return Kick("[999MS] L4: writefile hooked")
         end
@@ -185,22 +182,18 @@ print("[999MS] Payload L1-L6 passed")
 --
 -- The loader owns the writefile monitor and sends detections through
 -- MS999Signal.OnDetect. Do not install a second hook here: it would require
--- a non-standard env.Signal API and make the loader's hook look like tampering
+-- a non-standard executor Signal API and make the loader's hook look like tampering
 -- during this payload's L4 preflight.
 -- ===========================================================
 
 -- ═══ Locals ═══
-local SCRIPT_NAME = E0.script or _G.script or "main"
+local SCRIPT_NAME = ctx.scriptName or "main"
 local SCRIPT_NAME_LOCKED = SCRIPT_NAME
--- Key may be pre-seeded by unrelated executor scripts; only a string is a key.
--- A function/table here would otherwise be assigned to TextBox.Text at UI startup.
-local USER_KEY = type(E0.Key) == "string" and E0.Key
-    or (type(_G.Key) == "string" and _G.Key or "")
+local USER_KEY = type(ctx.key) == "string" and ctx.key or ""
 local E1 = ""
--- Capture the caller's one-shot key locally; never keep or re-publish it in
--- the shared executor environment.
-E0.Key = nil
-_G.Key = nil
+-- The key arrived as a local positional argument; discard it from the context
+-- as soon as this stage has captured its private copy.
+ctx.key = nil
 
 local Char = ("").char
 local Byte = ("").byte
@@ -233,34 +226,25 @@ local function StopChecks()
     ServerId = ""
     XORKey = ""
 
-    local env = E0
-    if env.MS999Chain == Chain and type(Chain) == "table" and Chain.Id == ChainId then
-        env.MS999Chain = nil
+    if ctx.chain == Chain and type(Chain) == "table" and Chain.Id == ChainId then
+        ctx.chain = nil
     end
-    local stopStageTwo = env.MS999StopChecks
+    local stopStageTwo = ctx.stopChecks
     if type(stopStageTwo) == "function" then
         pcall(stopStageTwo)
     else
-        env.MS999ChecksActive = false
-        env.MS999WriteMonitor = nil
+        ctx.checksActive = false
+        ctx.writeMonitor = nil
     end
 
-    env.MS999Loader = nil
-    env.MS999Ticket = nil
-    env.MS999Token = nil
-    env.MS999Secret = nil
-    env.MS999Session = nil
-    env.MS999Hop = nil
-    env.MS999Script = nil
-    env.MS999LoadTime = nil
-    env.MS999Signal = nil
-    env.MS999Request = nil
-    env.MS999RequestAudit = nil
-    env.Key = nil
-    _G.Key = nil
-    env.MS999 = nil
-    _G.MS999 = nil
-    MS999 = nil
+    ctx.loaderProof = nil
+    ctx.loaderTime = nil
+    ctx.loaderMarker = nil
+    ctx.signal = nil
+    ctx.request = nil
+    ctx.requestAudit = nil
+    ctx.key = nil
+    ctx.running = nil
 end
 
 local function KickPlayer(Reason, Code)
@@ -306,8 +290,7 @@ local function Split(str, sep)
 end
 
 local function GetHWID()
-    -- Only accept executor-native getters. A Lua callback from getgenv/_G is
-    -- caller-controlled and must never become the device binding.
+    -- Only accept executor-native getters; a Lua callback is caller-controlled.
     local fs = {}
     local f = type(syn) == "table" and syn.get_hwid or nil
     if f then fs[#fs + 1] = f end
@@ -342,10 +325,8 @@ local function GetHWID()
 end
 
 -- ═══ T2-T19 ═══
-if E0.MS999 and MS999 and _G.MS999 then return end
-E0.MS999 = true
-MS999 = true
-_G.MS999 = true
+if ctx.running then return end
+ctx.running = true
 
 if RunService:IsStudio() then return TamperKick("T2") end
 
@@ -386,13 +367,44 @@ end
 
 do
     local test = {}
-    E0.__MS999_test = test
-    if E0.__MS999_test ~= test or getgenv ~= G0 then return TamperKick("T6") end
-    E0.__MS999_test = nil
+    ctx.test = test
+    if ctx.test ~= test then return TamperKick("T6") end
+    ctx.test = nil
 end
 
-local SafeLoadstring = loadstring
-local SafeGetGenv = function() return E0 end
+local function CheckExecutorApiRefs()
+    local expected = {
+        loadstring = RealLoadstring,
+        writefile = RealGlobalWriteFile,
+        isfunctionhooked = RealIsHooked,
+        getinfo = RealDebugGetInfo,
+        hookfunction = RealHookFunction,
+        rawset = RealRawset,
+        rawget = RealRawget,
+    }
+    local current = {
+        loadstring = loadstring,
+        writefile = writefile,
+        isfunctionhooked = isfunctionhooked,
+        getinfo = debug.getinfo,
+        hookfunction = hookfunction,
+        rawset = rawset,
+        rawget = rawget,
+    }
+    for name, original in pairs(expected) do
+        if type(original) == "function" and current[name] ~= original then
+            return false, name .. " changed"
+        end
+    end
+    return true
+end
+
+do
+    local ok, reason = CheckExecutorApiRefs()
+    if not ok then return TamperKick("T-RAWSET3:" .. reason) end
+end
+
+local SafeLoadstring = RealLoadstring
 local SafeSetClipboard = setclipboard or toclipboard
 
 do
@@ -403,7 +415,7 @@ do
         local ok, hooked = pcall(RealIsHooked, SafeLoadstring)
         if not ok or hooked then return TamperKick("T13") end
     end
-    if SafeGetGenv().loadstring ~= SafeLoadstring then return TamperKick("T13") end
+    if loadstring ~= SafeLoadstring then return TamperKick("T13") end
     local ok, fn = pcall(SafeLoadstring, "return 1 + 1")
     if not ok or type(fn) ~= "function" then return TamperKick("T13") end
     local ok2, result = pcall(fn)
@@ -418,7 +430,7 @@ end
 -- Use the request function captured and audited by the loader instead of
 -- resolving a fresh global alias that may have been replaced afterwards.
 do
-    local capturedRequest = SafeGetGenv().MS999Request
+    local capturedRequest = ctx.request
     if type(capturedRequest) ~= "function" then
         return TamperKick("HTTP: missing captured request")
     end
@@ -722,6 +734,8 @@ local function EncodeBody(tbl)
 end
 
 -- ═══ Load & Run ═══
+local MS999_UI = nil
+
 local function LoadScript(d, h)
     if not ChecksActive then return end
     if not chainIs("payload", CHAIN_SESSION_TTL) then
@@ -749,7 +763,7 @@ local function LoadScript(d, h)
 
     ServerId = d.ServerId or ""
 
-    if _G.MS999_UI then pcall(function() _G.MS999_UI:Destroy() end); _G.MS999_UI = nil end
+    if MS999_UI then pcall(function() MS999_UI:Destroy() end); MS999_UI = nil end
 
     print("[999MS] Loading main script...")
 
@@ -762,7 +776,7 @@ local function LoadScript(d, h)
 
     local chunk = SafeLoadstring(d.Body)
     if not chunk then return KickPlayer("Load failed", 0) end
-    local ok = pcall(chunk, true, q, s, r, p, SCRIPT_NAME_LOCKED, tick(), h, HttpRequest, Chain, ChainEnv)
+    local ok = pcall(chunk, true, q, s, r, p, SCRIPT_NAME_LOCKED, tick(), h, HttpRequest, Chain, ctx)
     if not ok then return KickPlayer("Run failed", 0) end
 
     print("[999MS] Main script loaded")
@@ -892,7 +906,7 @@ end
 
 -- ═══ UI ═══
 local function MakeUI()
-    if _G.MS999_UI then pcall(function() _G.MS999_UI:Destroy() end) end
+    if MS999_UI then pcall(function() MS999_UI:Destroy() end) end
 
     local gui = Instance.new("ScreenGui")
     gui.Name = "999MSUI"
@@ -900,7 +914,7 @@ local function MakeUI()
     gui.IgnoreGuiInset = true
     pcall(function() gui.Parent = game:GetService("CoreGui") end)
     if not gui.Parent then gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui") end
-    _G.MS999_UI = gui
+    MS999_UI = gui
 
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 340, 0, 300)
@@ -957,7 +971,7 @@ local function MakeUI()
 
     close.MouseButton1Click:Connect(function()
         gui:Destroy()
-        _G.MS999_UI = nil
+        MS999_UI = nil
         StopChecks()
     end)
 

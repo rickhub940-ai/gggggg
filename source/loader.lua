@@ -7,6 +7,8 @@ local gamaramam = {
 -- 999MS Bootstrap + Anti (Signal-based + T-RAWSET)
 -- Anti-Save ตามไฟล์ X 100%
 -- ===========================================================
+local ctx = ...
+if type(ctx) ~= "table" then error("MS999:CHAIN_CONTEXT_MISSING", 0) end
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
@@ -79,15 +81,10 @@ local BASE_URL = "@BASE_URL@"
 local CHAIN_VERSION = "999MS-chain-v1"
 local CHAIN_TTL = 20
 
-local G0 = getgenv
-if type(G0) ~= "function" then return Kick("[999MS] getgenv unavailable") end
-local E0 = G0()
-if type(E0) ~= "table" then return Kick("[999MS] getgenv invalid") end
-local ChainEnv = E0
-local Chain = ChainEnv.MS999Chain
+local Chain = ctx.chain
 local ChainId = type(Chain) == "table" and Chain.Id or nil
 local function chainIs(stage, maxAge)
-    local current = ChainEnv.MS999Chain
+    local current = ctx.chain
     return current == Chain
         and type(current) == "table"
         and current.Version == CHAIN_VERSION
@@ -103,25 +100,11 @@ if not chainIs("stage2", CHAIN_TTL) then
     return Kick("[999MS] Chain rejected: run loadc.lua")
 end
 
--- ═══ T0: require getgenv().script ═══
--- Default script name so a plain loadstring works without extra setup.
--- getgenv().script can still override it.
-local userScript = E0.script or _G.script or "main"
-if userScript == nil then
-    return Kick(
-        "[999MS] Set getgenv().script first:\n\n" ..
-        'getgenv().script = "scriptname"\n' ..
-        'loadstring(game:HttpGet("' .. BASE_URL .. '/loadc.lua"))()'
-    )
-end
-if type(userScript) ~= "string" then
-    return Kick("[999MS] getgenv().script must be string")
-end
-if #userScript < 1 or #userScript > 64 then
-    return Kick("[999MS] getgenv().script must be 1-64 chars")
-end
-if not userScript:match("^[%w_%-]+$") then
-    return Kick("[999MS] getgenv().script invalid format")
+-- The script name arrived as a positional local from Stage 1.
+local userScript = ctx.scriptName
+if type(userScript) ~= "string" or #userScript < 1 or #userScript > 64
+    or not userScript:match("^[%w_%-]+$") then
+    return Kick("[999MS] Invalid script argument")
 end
 
 local SCRIPT_NAME = userScript
@@ -158,7 +141,7 @@ local MS999Signal = {
     OnLog = createSignal(),
     OnHookDetected = createSignal(),
 }
-E0.MS999Signal = MS999Signal
+ctx.signal = MS999Signal
 
 -- ═══ Subscribers ═══
 MS999Signal.OnKick:Connect(function(reason)
@@ -190,17 +173,15 @@ end)
 
 -- ═══ Capture real functions ═══
 local RealLoadstring = loadstring
--- Stage 2 owns the writefile hook. Its reference may be exposed through
--- E0 while the executor's global writefile alias is a different,
--- equivalent reference, so capture the Stage-2 monitor first.
-local Stage2WriteMonitor = E0.MS999WriteMonitor
-local RealWriteFile = type(Stage2WriteMonitor) == "function" and Stage2WriteMonitor
-    or ((E0 and E0.writefile) or writefile)
+local RealGlobalWriteFile = writefile
+-- Stage 2 passes its writefile monitor through the local context. Keep the
+-- direct global alias snapshot separately for compatibility with split aliases.
+local Stage2WriteMonitor = ctx.writeMonitor
+local RealWriteFile = type(Stage2WriteMonitor) == "function" and Stage2WriteMonitor or RealGlobalWriteFile
 local RealReadFile = readfile
 local RealIsFile = isfile
 local RealDelfile = delfile
 local RealListFiles = listfiles
-local RealGetGenv = function() return E0 end
 local RealIsHooked = isfunctionhooked
 local RealDebugGetInfo = debug.getinfo
 local RealHookFunction = hookfunction
@@ -211,16 +192,23 @@ local RealRawget = rawget
 -- ═══ Helper ═══
 local function checkFunction(fn, name)
     if type(fn) ~= "function" then return false, "missing" end
+    local current
+    if name == "loadstring" then current = loadstring
+    elseif name == "writefile" then current = writefile
+    elseif name == "readfile" then current = readfile
+    elseif name == "isfile" then current = isfile
+    elseif name == "hookfunction" then current = hookfunction
+    elseif name == "rawset" then current = rawset
+    elseif name == "rawget" then current = rawget
+    end
+    local expected = name == "writefile" and RealGlobalWriteFile or fn
+    if current and expected and current ~= expected then return false, "reference changed" end
     local info = RealDebugGetInfo(fn)
     if not info or info.what ~= "C" then return false, "not C function" end
     if type(RealIsHooked) == "function" then
         local ok, hooked = pcall(RealIsHooked, fn)
-        local trustedWriteMonitor = name == "writefile"
-            and RealGetGenv().MS999WriteMonitor == fn
+        local trustedWriteMonitor = name == "writefile" and ctx.writeMonitor == fn
         if ok and hooked and not trustedWriteMonitor then return false, "hooked" end
-    end
-    if RealGetGenv()[name] and RealGetGenv()[name] ~= fn then
-        return false, "getgenv replaced"
     end
     return true
 end
@@ -272,60 +260,19 @@ do
     end
 end
 
--- ═══ T6: getgenv integrity ═══
+-- ═══ T6: positional context integrity ═══
 do
     local test = {}
-    E0.__MS999_test = test
-    if E0.__MS999_test ~= test or getgenv ~= G0 then
-        return Kick("[999MS] T6: getgenv tampered")
+    ctx.test = test
+    if ctx.test ~= test then
+        return Kick("[999MS] T6: local context tampered")
     end
-    E0.__MS999_test = nil
+    ctx.test = nil
 end
 
 -- ═══ T13: loadstring protection ═══
 local SafeLoadstring = RealLoadstring
-local SafeGetGenv = RealGetGenv
 
--- A loadstring hook installed before this loader starts can make a C-closure
--- check pass. Probe it with a temporary writefile interceptor: source-saving
--- wrappers (including the common `writefile(..., chunk)` pattern) will attempt
--- to write the probe and are rejected before the payload is fetched.
-local function loadstringWritesSource()
-    if type(SafeLoadstring) ~= "function" or type(RealWriteFile) ~= "function" then
-        return false
-    end
-
-    local env = SafeGetGenv()
-    if type(env) ~= "table" or env.writefile ~= RealWriteFile then
-        return false
-    end
-
-    local originalWrite = env.writefile
-    local wroteDuringProbe = false
-    local interceptor = function(...)
-        wroteDuringProbe = true
-        -- Do not create the probe file. The wrapper only needs a successful
-        -- return value to continue, then the loader can terminate safely.
-        return true
-    end
-
-    local installed = pcall(function()
-        env.writefile = interceptor
-    end) and env.writefile == interceptor
-    if not installed then
-        pcall(function() env.writefile = originalWrite end)
-        return false
-    end
-
-    local compiledOk, compiled = pcall(SafeLoadstring, "-- 999MS source-save probe\nreturn true")
-    pcall(function() env.writefile = originalWrite end)
-
-    -- Leave the existing T13 checks to report a broken loadstring implementation.
-    if not compiledOk or type(compiled) ~= "function" then
-        return false
-    end
-    return wroteDuringProbe
-end
 
 do
     if type(SafeLoadstring) ~= "function" then
@@ -341,11 +288,8 @@ do
             return Kick("[999MS] T13: loadstring hooked")
         end
     end
-    if SafeGetGenv().loadstring ~= SafeLoadstring then
-        return Kick("[999MS] T13: getgenv().loadstring replaced")
-    end
-    if loadstringWritesSource() then
-        return Kick("[999MS] T13: loadstring attempted to save source")
+    if loadstring ~= SafeLoadstring then
+        return Kick("[999MS] T13: loadstring reference changed")
     end
     local ok, fn = pcall(SafeLoadstring, "return 1 + 1")
     if not ok or type(fn) ~= "function" then
@@ -366,12 +310,12 @@ do
         end
         if type(RealIsHooked) == "function" then
             local ok, hooked = pcall(RealIsHooked, RealWriteFile)
-            local trustedWriteMonitor = SafeGetGenv().MS999WriteMonitor == RealWriteFile
+            local trustedWriteMonitor = ctx.writeMonitor == RealWriteFile
             if ok and hooked and not trustedWriteMonitor then
                 return Kick("[999MS] T14: writefile hooked")
             end
         end
-        if SafeGetGenv().writefile and SafeGetGenv().writefile ~= RealWriteFile then
+        if RealGlobalWriteFile and writefile ~= RealGlobalWriteFile then
             return Kick("[999MS] T14: writefile replaced")
         end
     end
@@ -436,36 +380,48 @@ do
     end
 end
 
--- ═══ T-RAWSET3: getgenv integrity ═══
-local function checkGenvIntegrity()
-    if E0.loadstring and E0.loadstring ~= RealLoadstring then
-        return false, "loadstring changed"
-    end
-    if type(RealWriteFile) == "function" and E0.writefile
-       and E0.writefile ~= RealWriteFile then
-        return false, "writefile changed"
-    end
-    if type(RealHookFunction) == "function" and E0.hookfunction
-       and E0.hookfunction ~= RealHookFunction then
-        return false, "hookfunction changed"
-    end
-    if type(RealIsHooked) == "function" and E0.isfunctionhooked
-       and E0.isfunctionhooked ~= RealIsHooked then
-        return false, "isfunctionhooked changed"
-    end
-    if type(RealRawset) == "function" and E0.rawset
-       and E0.rawset ~= RealRawset then
-        return false, "rawset changed"
-    end
-    if type(RealRawget) == "function" and E0.rawget
-       and E0.rawget ~= RealRawget then
-        return false, "rawget changed"
+-- ═══ T-RAWSET3: direct executor API reference integrity ═══
+-- Compare the standard API aliases captured as locals with their current
+-- direct globals; the loader no longer consults an executor environment table.
+local function checkExecutorApiIntegrity()
+    local expected = {
+        loadstring = RealLoadstring,
+        writefile = RealGlobalWriteFile,
+        readfile = RealReadFile,
+        isfile = RealIsFile,
+        delfile = RealDelfile,
+        listfiles = RealListFiles,
+        isfunctionhooked = RealIsHooked,
+        hookfunction = RealHookFunction,
+        newcclosure = RealNewCClosure,
+        rawset = RealRawset,
+        rawget = RealRawget,
+        getinfo = RealDebugGetInfo,
+    }
+    local current = {
+        loadstring = loadstring,
+        writefile = writefile,
+        readfile = readfile,
+        isfile = isfile,
+        delfile = delfile,
+        listfiles = listfiles,
+        isfunctionhooked = isfunctionhooked,
+        hookfunction = hookfunction,
+        newcclosure = newcclosure,
+        rawset = rawset,
+        rawget = rawget,
+        getinfo = debug.getinfo,
+    }
+    for name, original in pairs(expected) do
+        if type(original) == "function" and current[name] ~= original then
+            return false, name .. " changed"
+        end
     end
     return true
 end
 
 do
-    local ok, reason = checkGenvIntegrity()
+    local ok, reason = checkExecutorApiIntegrity()
     if not ok then
         return Kick("[999MS] T-RAWSET3: " .. reason)
     end
@@ -486,18 +442,11 @@ do
         end
     end
 
-    local env = RealGetGenv()
-    local envHttp = type(env.http) == "table" and env.http or nil
     local globalHttp = type(http) == "table" and http or nil
-    addCandidate("getgenv.http.request", envHttp and envHttp.request)
-    addCandidate("http.request", globalHttp and globalHttp.request)
-    addCandidate("getgenv.request", env.request)
-    addCandidate("request", request)
-    addCandidate("getgenv.http_request", env.http_request)
-    addCandidate("http_request", http_request)
-    local envSyn = type(env.syn) == "table" and env.syn or nil
     local globalSyn = type(syn) == "table" and syn or nil
-    addCandidate("getgenv.syn.request", envSyn and envSyn.request)
+    addCandidate("http.request", globalHttp and globalHttp.request)
+    addCandidate("request", request)
+    addCandidate("http_request", http_request)
     addCandidate("syn.request", globalSyn and globalSyn.request)
 
     for _, candidate in ipairs(candidates) do
@@ -524,8 +473,8 @@ do
 end
 
 local HttpRequest = RealHttpRequest
-E0.MS999Request = RealHttpRequest
-E0.MS999RequestAudit = RequestAudit
+ctx.request = RealHttpRequest
+ctx.requestAudit = RequestAudit
 
 -- ═══ Stage 3: Anti checks ═══
 -- Stage 2 (savecheck.lua) completed its filesystem scan and installed the
@@ -537,40 +486,40 @@ do
     for _ = 1, 32 do
         dynamicPart = dynamicPart .. string.char(math.random(97, 122))
     end
-    E0.MS999LoaderProof = "999MS_loader_v1:" .. dynamicPart
-    E0.MS999LoaderTime = tick()
-    E0.MS999LoaderMarker = "LSE_" .. tostring(math.random(100000, 999999))
+    ctx.loaderProof = "999MS_loader_v1:" .. dynamicPart
+    ctx.loaderTime = tick()
+    ctx.loaderMarker = "LSE_" .. tostring(math.random(100000, 999999))
 end
 
 -- ═══ T-RAWSET4: 999MS flags integrity snapshot ═══
 local MS999FlagSnapshot = {
-    MS999Signal = E0.MS999Signal,
-    MS999WriteMonitor = E0.MS999WriteMonitor,
-    MS999Request = E0.MS999Request,
-    MS999LoaderProof = E0.MS999LoaderProof,
-    MS999LoaderMarker = E0.MS999LoaderMarker,
-    MS999LoaderTime = E0.MS999LoaderTime,
+    MS999Signal = ctx.signal,
+    MS999WriteMonitor = ctx.writeMonitor,
+    MS999Request = ctx.request,
+    MS999LoaderProof = ctx.loaderProof,
+    MS999LoaderMarker = ctx.loaderMarker,
+    MS999LoaderTime = ctx.loaderTime,
 }
 
 local function checkMS999Flags()
-    if E0.MS999Signal ~= MS999FlagSnapshot.MS999Signal then
+    if ctx.signal ~= MS999FlagSnapshot.MS999Signal then
         return false, "999MS signal replaced"
     end
-    if E0.MS999WriteMonitor ~= MS999FlagSnapshot.MS999WriteMonitor
+    if ctx.writeMonitor ~= MS999FlagSnapshot.MS999WriteMonitor
         or MS999FlagSnapshot.MS999WriteMonitor ~= RealWriteFile then
         return false, "write monitor replaced"
     end
-    if E0.MS999Request ~= MS999FlagSnapshot.MS999Request
+    if ctx.request ~= MS999FlagSnapshot.MS999Request
         or MS999FlagSnapshot.MS999Request ~= RealHttpRequest then
         return false, "request replaced"
     end
-    if E0.MS999LoaderProof ~= MS999FlagSnapshot.MS999LoaderProof then
+    if ctx.loaderProof ~= MS999FlagSnapshot.MS999LoaderProof then
         return false, "999MS loader proof replaced"
     end
-    if E0.MS999LoaderMarker ~= MS999FlagSnapshot.MS999LoaderMarker then
+    if ctx.loaderMarker ~= MS999FlagSnapshot.MS999LoaderMarker then
         return false, "999MS loader marker replaced"
     end
-    if E0.MS999LoaderTime ~= MS999FlagSnapshot.MS999LoaderTime then
+    if ctx.loaderTime ~= MS999FlagSnapshot.MS999LoaderTime then
         return false, "999MS loader time replaced"
     end
     return true
@@ -603,7 +552,7 @@ if type(nextUrl) ~= "string" or #nextUrl < 40 or nextUrl:find("NEXT@", 1, true) 
     return Kick("[999MS] Stage link unavailable")
 end
 
-local cryptTable = E0.crypt or crypt
+local cryptTable = (syn and syn.crypt) or crypt
 local hasher = type(cryptTable) == "table" and cryptTable.hash or nil
 if type(hasher) ~= "function" then
     return Kick("[999MS] Payload hash unavailable")
@@ -638,7 +587,7 @@ print("[999MS] Payload received, running...")
 
 local fn = SafeLoadstring(payloadSrc)
 if not fn then return Kick("[999MS] Load failed") end
-local runOk, runErr = pcall(fn)
+local runOk, runErr = pcall(fn, ctx)
 if not runOk then
     -- Preserve the reference code and show a redacted short error so an
     -- executor-specific startup failure can be diagnosed without exposing keys.
