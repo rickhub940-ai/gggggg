@@ -3,8 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { verifyKey, createLink } = require('../lib/platoboost');
-const { resolveHwid, deviceBindingId } = require('../lib/hwid');
-const { issueTicket, verifyTicket, hashHwid } = require('../lib/ticket');
+const { resolveHwid, deviceBindingId, canonical } = require('../lib/hwid');
+const { issueTicket, verifyTicket, hashHwid, hashBindingId } = require('../lib/ticket');
 const link = require('../lib/link');
 const chainLinks = require('../lib/chainlink');
 const { obfuscateStageOne, obfuscationBudgetMs } = require('../lib/obfuscate');
@@ -182,25 +182,41 @@ const OPAQUE_ACTIONS = Object.freeze({
   k8: 'start',
 });
 
+function decodeDeviceParts(body = {}) {
+  const parts = [body.b, body.c, body.d, body.e, body.f];
+  if (parts.some((part) => typeof part !== 'string' || !part)) return '';
+  const encoded = parts.join('');
+  if (encoded.length > 1024 || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return '';
+  try {
+    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+    if (!decoded || Buffer.from(decoded, 'utf8').toString('base64') !== encoded) return '';
+    if (canonical(decoded) !== decoded || deviceBindingId(decoded) !== encoded) return '';
+    return decoded;
+  } catch {
+    return '';
+  }
+}
+
 function decodeOpaqueRequest(action, body = {}) {
+  const hwid = decodeDeviceParts(body);
   switch (action) {
     case 'verify':
       return {
-        key: body.a, c: body.b, scriptName: body.c, userId: body.d,
-        Rng1: body.e, Rng2: body.f, Rng3: body.g,
-        Rng4: body.h, Rng5: body.i, RngFloat: body.j,
+        key: body.a, c: hwid, scriptName: body.g, userId: body.h,
+        Rng1: body.i, Rng2: body.j, Rng3: body.k,
+        Rng4: body.l, Rng5: body.m, RngFloat: body.n,
       };
     case 'script':
-      return { ticket: body.a, scriptName: body.c, Data: body.k, hop: body.l, eq: body.m };
+      return { ticket: body.a, c: hwid, scriptName: body.g, Data: body.o, hop: body.q, eq: body.r };
     case 'script-verify':
       return {
-        ticket: body.a, c: body.b, scriptName: body.c,
-        hop: body.l, runtimeSecret: body.n, scriptToken: body.o,
+        ticket: body.a, c: hwid, scriptName: body.g,
+        hop: body.q, runtimeSecret: body.s, scriptToken: body.t,
       };
     case 'heartbeat':
-      return { ticket: body.a, Data: body.k };
+      return { ticket: body.a, c: hwid, Data: body.o };
     case 'start':
-      return { c: body.b };
+      return { c: hwid };
     default:
       return {};
   }
@@ -222,9 +238,9 @@ function noteEvent(kind, detail) {
   if (securityEvents.length > EVENTS_MAX) securityEvents.splice(0, securityEvents.length - EVENTS_MAX);
 }
 
-// Require both the explicit client getter (`gethwid()` / `get_exwid()`) and an
-// executor-provided fingerprint header. Neither is hardware attestation alone;
-// the pair is combined before Platoboost sees its single identifier field.
+// The client getter HWID is transported as five Base64 fragments. Executor
+// fingerprint headers are deliberately ignored for persistent key identity.
+// Base64 is reversible encoding, not encryption.
 function hwidFromRequest(req, bodyValue) {
   const result = resolveHwid(req.headers || {}, bodyValue);
   if (!result.ok && result.reason === 'hwid mismatch') {
@@ -233,14 +249,14 @@ function hwidFromRequest(req, bodyValue) {
   return result;
 }
 
-// A ticket is bound to the pair of device signals that earned it. Every step
-// re-resolves both signals, so changing either invalidates the ticket.
+// A ticket is bound to the canonical HWID binding that earned it. Every
+// protected request re-resolves that value before checking the ticket.
 function deviceMatches(req, hwidHash, bodyValue) {
   const device = hwidFromRequest(req, bodyValue);
   if (!device.ok) return { ok: false, reason: device.reason };
   if (typeof hwidHash !== 'string' || !hwidHash) return { ok: false, reason: 'ticket has no device' };
-  if (hashHwid(device.bindingId) !== hwidHash) {
-    noteEvent('device_reject', 'ticket used with a different HWID/fingerprint pair');
+  if (hashBindingId(device.bindingId) !== hwidHash) {
+    noteEvent('device_reject', 'ticket used with a different HWID binding');
     return { ok: false, reason: 'device mismatch' };
   }
   return { ok: true, ...device };
@@ -645,8 +661,8 @@ async function handleVerify(req, res, ip) {
   }
 
   const ticket = issueTicket({
-    // Reuse the composite HWID+fingerprint digest for tickets and runtime proof.
-    hwidHash: hashHwid(bindingId),
+    // Reuse the canonical Base64-HWID binding for tickets and runtime proof.
+    hwidHash: hashBindingId(bindingId),
     scope: 'script',
     userId: userId || null,
     scriptName,
@@ -682,7 +698,7 @@ async function handleScript(req, res, ip) {
   const payload = verifyTicket(ticket);
   if (!payload) return res.status(401).json({ Valid: false, reason: 'invalid ticket' });
 
-  const device = deviceMatches(req, payload.hwidHash);
+  const device = deviceMatches(req, payload.hwidHash, req.body?.c ?? req.body?.hwid);
   if (!device.ok)
     return res.status(403).json({ Valid: false, reason: device.reason });
 
@@ -813,13 +829,12 @@ async function handleScriptVerify(req, res) {
   if (!payload) return rejectRuntimeVerification(res, 401, 'D2_TICKET_INVALID');
   if (payload.scope !== 'script') return rejectRuntimeVerification(res, 403, 'D2_TICKET_SCOPE');
 
-  // Resolve HWID before burning the next-step hop so a missing executor
-  // fingerprint does not make a retried legitimate request look replayed.
+  // Resolve HWID before burning the next-step hop so an invalid device
+  // request does not make a retried legitimate request look replayed.
   const device = deviceMatches(req, payload.hwidHash, hwid);
   if (!device.ok) {
     const categories = {
       'invalid hwid format': 'D2_HWID_FORMAT',
-      'fingerprint required': 'D2_FINGERPRINT_MISSING',
       'hwid mismatch': 'D2_HWID_MISMATCH',
       'device mismatch': 'D2_DEVICE_BINDING_MISMATCH',
     };
@@ -842,7 +857,7 @@ async function handleScriptVerify(req, res) {
     ticketPayload: payload,
     runtimeSecret,
     scriptToken,
-    hwidHash: hashHwid(device.bindingId),
+    hwidHash: hashBindingId(device.bindingId),
     scriptName,
     runtimeTtl: RUNTIME_TTL,
   });
@@ -874,7 +889,7 @@ async function handleScriptVerify(req, res) {
 // ═══ /api/heartbeat ═══
 async function handleHeartbeat(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
-  const { ticket, Data } = req.body || {};
+  const { ticket, Data, c, hwid } = req.body || {};
 
   if (typeof ticket !== 'string' || ticket.length > 4096)
     return res.status(400).json({ kick: null });
@@ -882,7 +897,7 @@ async function handleHeartbeat(req, res, ip) {
   const payload = verifyTicket(ticket);
   if (!payload) return res.status(401).json({ kick: 'Session expired' });
 
-  const device = deviceMatches(req, payload.hwidHash);
+  const device = deviceMatches(req, payload.hwidHash, c ?? hwid);
   if (!device.ok) {
     sessions.delete(payload.jti);
     return res.status(200).json({ kick: 'Device mismatch' });
@@ -929,19 +944,18 @@ async function handleHeartbeat(req, res, ip) {
   }, xorKey));
 }
 
-function verifiedScriptContext(ticket, hwid, fingerprint, scriptName, ip) {
+function verifiedScriptContext(ticket, hwid, scriptName, ip) {
   if (typeof ticket !== 'string' || ticket.length > 4096) return { error: 'ticket required', status: 400 };
   if (typeof hwid !== 'string' || hwid.length < 4 || hwid.length > 512) return { error: 'invalid hwid format', status: 400 };
-  if (typeof fingerprint !== 'string' || fingerprint.length < 4 || fingerprint.length > 512) return { error: 'fingerprint required', status: 400 };
   const payload = verifyTicket(ticket);
   if (!payload || payload.scope !== 'script') return { error: 'invalid ticket', status: 401 };
-  const bindingId = deviceBindingId(hwid, fingerprint);
-  if (!timingSafeStringEquals(payload.hwidHash, hashHwid(bindingId))) return { error: 'device mismatch', status: 403 };
+  const bindingId = deviceBindingId(hwid);
+  if (!timingSafeStringEquals(payload.hwidHash, hashBindingId(bindingId))) return { error: 'device mismatch', status: 403 };
   const name = typeof scriptName === 'string' && scriptName.length ? scriptName : payload.scriptName;
   if (!isValidScriptName(name) || name !== payload.scriptName) return { error: 'scriptName mismatch', status: 403 };
   const reason = checkRevoked({ hwid, userId: payload.userId, ip });
   if (reason) return { error: 'Banned: ' + reason, status: 403 };
-  return { payload, name, hwidHash: hashHwid(bindingId) };
+  return { payload, name, hwidHash: hashBindingId(bindingId) };
 }
 
 async function handleStart(req, res, ip) {

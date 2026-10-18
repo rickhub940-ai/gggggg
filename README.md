@@ -52,10 +52,10 @@ PORT=10000 node server.js
 
 | บริการ | ที่อยู่ | สถานะ |
 |---|---|---|
-| เว็บ + API | https://loader999ms.vercel.app | commit `8773472` (ไม่มี realtime/WebSocket) |
+| เว็บ + API | https://loader999ms.vercel.app | latest confirmed: `7e05ddf` (opaque request fields; no realtime/WebSocket) |
 | แผงควบคุม | https://loader999ms.vercel.app/control | HTTP only |
 
-การเปลี่ยน hybrid HWID ที่บันทึกไว้ในหัวข้อล่างและ source ปัจจุบันยังเป็น **working tree เท่านั้น** — ยังไม่ commit, push หรือ deploy.
+การเปลี่ยน HWID-only แบบ 5 ส่วน Base64 ในหัวข้อล่างยังเป็น **working tree เท่านั้น** — ยังไม่ผ่าน test, commit, push หรือ deploy; production ยังใช้ composite HWID+fingerprint จาก `7e05ddf`.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -127,23 +127,17 @@ local gamaramam = { "<base>/<token>" }
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
 
-## 2026-10-18 — ผูกอุปกรณ์ด้วย HWID + fingerprint
+## 2026-10-18 — HWID-only binding, 5 Base64 request parts (working tree)
 
-อิงแนวคิดจากบทความ Shiawase, `zoolah/Luasec` และ `loris1337/Roblox-Whitelist-System` แต่เป็น protocol ของโปรเจกต์นี้เอง ไม่ได้คัดลอกโค้ดหรือจำลอง API ของแต่ละระบบแบบตรงตัว:
+- Platoboost ยังเป็นผู้ตรวจสอบคีย์และอุปกรณ์ ไม่มีการเพิ่มฐานข้อมูลคีย์แยก
+- Client อ่าน HWID ผ่าน `gethwid()`, `get_exwid()` และ aliases ที่รองรับ; ถ้า getter ใช้ไม่ได้จะหยุด และไม่ fallback ไป `GetClientId()` ของ Roblox
+- ทุก request ไป `/api/q` จะ canonicalize HWID (ตัดช่องว่างหัวท้ายและแปลงเป็นตัวพิมพ์เล็ก), เข้ารหัส Base64 แล้วแบ่งแบบ deterministic เป็น 5 field (`b`–`f`). Server นำมาต่อและตรวจสอบ ก่อนใช้ Base64 canonical ทั้งชุดเป็น `bindingId`; ไม่มีการส่ง HWID plaintext ซ้ำใน custom header
+- Platoboost รับ identifier เดียว; `lib/platoboost.js` hash `bindingId` แบบ Base64 ที่รักษาตัวพิมพ์เล็ก/ใหญ่ตรงตามเดิมเป็น identifier ที่ส่งให้ provider ส่วน ticket และ runtime proof ใช้ hash ของ binding ID เดียวกัน Fingerprint headers ถูกละเว้นและไม่กระทบ key/ticket binding
+- `/api/verify` → `/api/script` → `/api/script-verify` ตรวจ identity จาก HWID-only ต่อเนื่อง พร้อมคง ticket, RNG/equation, hop และ runtime-proof checks เดิมไว้ Legacy named routes ยังรับ field ที่มี HWID ตรง ๆ ระหว่างเปลี่ยนผ่าน
+- Platoboost bindings เดิมที่สร้างจาก composite HWID+fingerprint จะไม่ตรงกับ identifier HWID-only ใหม่; หลัง rollout อาจต้อง reset/rebind คีย์เหล่านั้นใน Platoboost
+- ไม่มีการเพิ่ม `getrawmetatable`, `hookmetamethod`, การ kick/crash หรือการอ้างว่า identity นี้เป็น hardware attestation
 
-- Key/device binding ตรวจผ่าน Platoboost; ไม่เพิ่ม MongoDB/Supabase หรือฐานข้อมูลคีย์ใหม่
-- Client ใช้ `gethwid()`, `get_exwid()` และ aliases (`syn.get_hwid`, `get_hwid`); ถ้า getter ใช้ไม่ได้จะหยุด ไม่ fallback ไป Roblox `GetClientId()`
-- request ใหม่ใช้ endpoint กลาง `/api/q` และ short aliases (`p`, `a`–`o`) ครอบคลุม key, ticket, HWID, script name, hop, RNG และ runtime proof; HWID custom header ใช้ชื่อ `x-r7q` แทนชื่อที่บอกความหมาย
-- Server ยังรับ routes/fields ชื่อเก่าไว้ชั่วคราวสำหรับ client ที่ deploy ไปแล้ว; executor เป็นผู้เติม `*-fingerprint` header เอง จึงเปลี่ยนชื่อจาก Lua ฝั่งเราไม่ได้
-- Server ต้องได้ทั้ง explicit HWID จาก client และ executor fingerprint header; ไม่มีค่าใดค่าหนึ่ง = ปฏิเสธ
-- เนื่องจาก Platoboost รับ identifier เดียว จึงสร้าง `bindingId = SHA256("999MS-device-binding-v1\\0" + canonical(HWID) + "\\0" + canonical(fingerprint))`; `lib/platoboost.js` hash `bindingId` เป็น identifier เดียวที่ส่งให้ provider และ ticket/runtime proof ใช้ hash ของ `bindingId` เดียวกัน
-- ทุก route ที่ใช้ ticket re-resolve HWID+fingerprint; `/api/verify` → `/api/script` → `/api/script-verify` ตรวจ ticket, RNG/equation proof, composite binding และ runtime proof ก่อนยอมให้ client รัน script
-- เปลี่ยน identifier นี้ทำให้ key ที่เคยผูกด้วย HWID อย่างเดียวต้อง rebind/reset ใน Platoboost ก่อน rollout; ห้าม fallback ไปใช้ HWID เดี่ยว เพราะจะทำให้ binding แบบคู่ไม่มีผล
-- ไม่ใช้ `getrawmetatable`, `hookmetamethod`, การสั่ง kick/crash, หรือการอ้างว่า client identity เป็น hardware attestation
-
-แหล่งอ้างอิง: [Shiawase whitelist series](https://shiawase.dev/blog/rblx-auth1), [Luasec](https://github.com/zoolah/Luasec), [Roblox-Whitelist-System](https://github.com/loris1337/Roblox-Whitelist-System). Luasec และ Loris repo ไม่พบ license ที่ระบุสิทธิ์นำโค้ดมาใช้ จึงใช้เป็นข้อมูลศึกษา ไม่คัดลอก implementation; repository Shiawase ระบุ MIT.
-
-**ข้อจำกัด:** ชื่อ field/path แบบ opaque เป็นเพียงการพรางรูปแบบ ไม่ใช่การเข้ารหัส; client Lua ถูกอ่าน/แก้ไขได้ และ fingerprint จาก executor ก็ปลอม/คัดลอกได้ จึงไม่มีวิธีรับประกัน “100%” ด้วยการตรวจฝั่ง client เพียงอย่างเดียว. `lib/999MS-server-sdk.js` เก็บ hop/replay state ใน memory ของ instance; การกระจายคำขอข้าม Vercel instances อาจกระทบการตรวจแบบ one-time จึงไม่ควรถือว่าเป็น shared durable store.
+**ข้อจำกัด:** Base64, การแบ่งเป็น 5 ส่วน และชื่อ field แบบ opaque ถอดกลับได้ เป็นเพียงรูปแบบ/การพราง ไม่ใช่ encryption ผู้ใช้ executor สามารถกู้คืนหรือปลอม HWID ที่ client รายงานได้ จึงไม่ใช่ hardware attestation. `lib/999MS-server-sdk.js` เก็บ hop/replay state ไว้ใน memory ของ instance; การกระจาย request ข้าม Vercel instances อาจกระทบ one-time checks และไม่ใช่ durable store ที่แชร์ร่วมกัน.
 
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด

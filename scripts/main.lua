@@ -57,22 +57,51 @@ end
 local req = I
 if type(req) ~= "function" then return Abort("[999MS] HTTP not supported") end
 local BASE_URL = "https://loader999mss.vercel.app"
+local CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local function SplitDevice(value)
+    value = string.lower((value:match("^%s*(.-)%s*$")))
+    local encoded = ""
+    for index = 1, #value, 3 do
+        local a, b, c = value:byte(index, index + 2)
+        a, b, c = a or 0, b or 0, c or 0
+        local number = bit32.lshift(a, 16) + bit32.lshift(b, 8) + c
+        local x = bit32.rshift(number, 18) % 64
+        local y = bit32.rshift(number, 12) % 64
+        local z = bit32.rshift(number, 6) % 64
+        local w = number % 64
+        encoded = encoded .. CHARSET:sub(x + 1, x + 1) .. CHARSET:sub(y + 1, y + 1)
+        if index + 1 > #value then
+            encoded = encoded .. "=="
+        elseif index + 2 > #value then
+            encoded = encoded .. CHARSET:sub(z + 1, z + 1) .. "="
+        else
+            encoded = encoded .. CHARSET:sub(z + 1, z + 1) .. CHARSET:sub(w + 1, w + 1)
+        end
+    end
+    local parts = {}
+    for index = 1, 5 do
+        local first = math.floor((index - 1) * #encoded / 5) + 1
+        local last = math.floor(index * #encoded / 5)
+        parts[string.char(97 + index)] = encoded:sub(first, last)
+    end
+    return parts
+end
 local headers = { ["Content-Type"] = "application/json" }
-if type(HWID) == "string" then headers["x-r7q"] = HWID end
+local body = {
+    p = "x9",
+    a = Ticket,
+    g = ExpectedScript,
+    q = E or "",
+    s = RuntimeSecret,
+    t = ScriptToken,
+}
+for key, value in pairs(SplitDevice(HWID)) do body[key] = value end
 
 local ok, res = pcall(req, {
     Url = BASE_URL .. "/api/q",
     Method = "POST",
     Headers = headers,
-    Body = HttpService:JSONEncode({
-        p = "x9",
-        a = Ticket,
-        b = HWID,
-        c = ExpectedScript,
-        l = E or "",
-        n = RuntimeSecret,
-        o = ScriptToken,
-    }),
+    Body = HttpService:JSONEncode(body),
 })
 
 if not ok or type(res) ~= "table" then

@@ -297,20 +297,42 @@ local function EncodeJson(value)
 end
 
 -- ═══ POST ═══
-local function PackRequest(path, payload)
+local function AddDeviceParts(out, hwid)
+    local value = string.lower((hwid:match("^%s*(.-)%s*$")))
+    local encoded = Base64(value)
+    local length = #encoded
+    for index = 1, 5 do
+        local first = math.floor((index - 1) * length / 5) + 1
+        local last = math.floor(index * length / 5)
+        out[string.char(97 + index)] = encoded:sub(first, last)
+    end
+end
+
+local function PackRequest(path, payload, hwid)
     local out = {}
     if path == "/api/verify" then
-        out.p = "q7"
-        out.a, out.b = payload.key, payload.c
-        out.c, out.d = payload.scriptName, payload.userId
-        out.e, out.f, out.g = payload.Rng1, payload.Rng2, payload.Rng3
-        out.h, out.i, out.j = payload.Rng4, payload.Rng5, payload.RngFloat
+        out.p, out.a = "q7", payload.key
+        AddDeviceParts(out, hwid)
+        out.g, out.h = payload.scriptName, payload.userId
+        out.i, out.j, out.k = payload.Rng1, payload.Rng2, payload.Rng3
+        out.l, out.m, out.n = payload.Rng4, payload.Rng5, payload.RngFloat
     elseif path == "/api/script" then
-        out.p = "m2"
-        out.a, out.c, out.k = payload.ticket, payload.scriptName, payload.Data
-        out.l, out.m = payload.hop, payload.eq
+        out.p, out.a = "m2", payload.ticket
+        AddDeviceParts(out, hwid)
+        out.g, out.o = payload.scriptName, payload.Data
+        out.q, out.r = payload.hop, payload.eq
+    elseif path == "/api/script-verify" then
+        out.p, out.a = "x9", payload.ticket
+        AddDeviceParts(out, hwid)
+        out.g, out.q = payload.scriptName, payload.hop
+        out.s, out.t = payload.runtimeSecret, payload.scriptToken
+    elseif path == "/api/heartbeat" then
+        out.p, out.a = "v4", payload.ticket
+        AddDeviceParts(out, hwid)
+        out.o = payload.Data
     elseif path == "/api/start" then
-        out.p, out.b = "k8", payload.c
+        out.p = "k8"
+        AddDeviceParts(out, hwid)
     else
         return nil
     end
@@ -318,13 +340,14 @@ local function PackRequest(path, payload)
 end
 
 local function postJSON(path, payload, hwid)
-    -- Reuse the exact value returned by the executor getter on all requests.
+    -- Reuse the same HWID; only its canonical Base64 form is sent, split into
+    -- five deterministic request fields. No plaintext HWID header is emitted.
     if type(hwid) ~= "string" or #hwid < 4 or #hwid > 512 then
         return nil, "Executor HWID getter unavailable"
     end
-    local packed = PackRequest(path, payload)
+    local packed = PackRequest(path, payload, hwid)
     if type(packed) ~= "table" then return nil, "Unsupported request" end
-    local headers = { ["Content-Type"] = "application/json", ["x-r7q"] = hwid }
+    local headers = { ["Content-Type"] = "application/json" }
     local ok, res = pcall(HttpRequest, {
         Url = BASE_URL .. "/api/q",
         Method = "POST",
