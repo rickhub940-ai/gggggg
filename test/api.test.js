@@ -257,6 +257,13 @@ async function main() {
   // the compacted body, so the name and the link stay readable.
   assert.ok(STAGE2.startsWith('local gamaramam = { "@NEXT@" };'),
     'the header is exactly `local gamaramam = { "<link>" }`');
+  const savecheckSource = fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8');
+  assert.ok(savecheckSource.includes('firstLine:sub(1, #HEAD_LINE) ~= HEAD_LINE'),
+    'save detection only accepts the marker at byte zero');
+  assert.ok(savecheckSource.includes('local savedLink = firstLine:match'),
+    'save detection validates the hand-off URL on the marker line');
+  assert.equal(savecheckSource.includes('text:find(HEAD_LINE, 1, true)'), false,
+    'save detection must not match marker text buried inside unrelated files');
   assert.ok(STAGE2.includes(`'local gamaramam = { "'`),
     'the save marker is that header line, with the token left out of the needle');
   assert.ok(/gamaramam\s*\[/.test(STAGE2), 'the body reads the table instead of copying it');

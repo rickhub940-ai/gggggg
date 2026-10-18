@@ -77,14 +77,16 @@ local BASE_URL = "@BASE_URL@"
 local HEAD_LINE = 'local gamaramam = { "' .. BASE_URL .. "/"
 local function isCopy(text)
     if type(text) ~= "string" then return false end
-    -- Half one: the header line, with the run token deliberately left out.
-    if text:find(HEAD_LINE, 1, true) then return true end
-    -- Half two: this run's own next-stage link.
-    local link = gamaramam[1]
-    if type(link) == "string" and #link > 40 and not link:find("NEXT@", 1, true) then
-        if text:find(link, 1, true) then return true end
-    end
-    return false
+    -- A saved stage must begin with the readable marker at byte zero. Check
+    -- the hand-off URL on that same header line; never match a marker substring
+    -- buried inside an unrelated executor cache/log file.
+    local firstLine = text:match("^[^\r\n]*") or ""
+    if firstLine:sub(1, #HEAD_LINE) ~= HEAD_LINE then return false end
+    local savedLink = firstLine:match('^local gamaramam = { "([^"]+)" }')
+    if type(savedLink) ~= "string" or #savedLink <= #BASE_URL + 1 then return false end
+    if savedLink:sub(1, #BASE_URL + 1) ~= BASE_URL .. "/" then return false end
+    if savedLink:find("NEXT@", 1, true) then return false end
+    return true
 end
 local CHAIN_VERSION = "999MS-chain-v1"
 local CHAIN_TTL = 20
