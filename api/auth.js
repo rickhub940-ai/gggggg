@@ -174,6 +174,37 @@ function isBrowserRequest(req) {
 
 // ═══ Main handler ═══
 const CONTROL_ACTIONS = new Set(['control-bans', 'control-traffic', 'control-events']);
+const OPAQUE_ACTIONS = Object.freeze({
+  q7: 'verify',
+  m2: 'script',
+  x9: 'script-verify',
+  v4: 'heartbeat',
+  k8: 'start',
+});
+
+function decodeOpaqueRequest(action, body = {}) {
+  switch (action) {
+    case 'verify':
+      return {
+        key: body.a, c: body.b, scriptName: body.c, userId: body.d,
+        Rng1: body.e, Rng2: body.f, Rng3: body.g,
+        Rng4: body.h, Rng5: body.i, RngFloat: body.j,
+      };
+    case 'script':
+      return { ticket: body.a, scriptName: body.c, Data: body.k, hop: body.l, eq: body.m };
+    case 'script-verify':
+      return {
+        ticket: body.a, c: body.b, scriptName: body.c,
+        hop: body.l, runtimeSecret: body.n, scriptToken: body.o,
+      };
+    case 'heartbeat':
+      return { ticket: body.a, Data: body.k };
+    case 'start':
+      return { c: body.b };
+    default:
+      return {};
+  }
+}
 // Ring buffer of the last 200 requests (no bodies, keys, HWIDs or tickets) so
 // the panel can show what an executor actually fetched and which status it got.
 const trafficLog = [];
@@ -265,7 +296,13 @@ async function handleLinkServe(req, res, url) {
 
 module.exports = async function handler(req, res) {
   const url = new URL(req.url, 'http://x');
-  const action = req.query?.action || url.searchParams.get('action');
+  const requestedAction = req.query?.action || url.searchParams.get('action');
+  const action = requestedAction === 'opaque'
+    ? OPAQUE_ACTIONS[req.body?.p]
+    : requestedAction;
+  if (requestedAction === 'opaque' && action) {
+    req.body = decodeOpaqueRequest(action, req.body);
+  }
 
   const trace = {
     ts: Date.now(),
@@ -557,7 +594,9 @@ async function serveArtifact(req, res, name, url, origin) {
 // ═══ /api/verify ═══// ═══ /api/verify ═══// ═══ /api/verify ═══
 async function handleVerify(req, res, ip) {
   const xorKey = process.env.PAYLOAD_XOR_KEY || '';
-  const { key, hwid, userId, scriptName } = req.body || {};
+  const body = req.body || {};
+  const { key, userId, scriptName } = body;
+  const hwid = body.c ?? body.hwid;
   // First request challenge: reject a simple forged `{ valid: true }` response
   // before issuing a signed ticket. The provider still owns key/device binding.
   // The deployed payload sends its RNG challenge with /api/script (where it is
@@ -762,7 +801,9 @@ function rejectRuntimeVerification(res, status, category) {
 }
 
 async function handleScriptVerify(req, res) {
-  const { ticket, hwid, scriptToken, runtimeSecret, scriptName, hop } = req.body || {};
+  const body = req.body || {};
+  const { ticket, scriptToken, runtimeSecret, scriptName, hop } = body;
+  const hwid = body.c ?? body.hwid;
 
   if (typeof ticket !== 'string' || ticket.length > 4096) {
     return rejectRuntimeVerification(res, 400, 'D2_TICKET_MISSING');
@@ -904,7 +945,8 @@ function verifiedScriptContext(ticket, hwid, fingerprint, scriptName, ip) {
 }
 
 async function handleStart(req, res, ip) {
-  const { hwid } = req.body || {};
+  const body = req.body || {};
+  const hwid = body.c ?? body.hwid;
   const device = hwidFromRequest(req, hwid);
   if (!device.ok) return res.status(400).json({ error: device.reason });
 

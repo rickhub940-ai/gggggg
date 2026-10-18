@@ -297,18 +297,39 @@ local function EncodeJson(value)
 end
 
 -- ═══ POST ═══
+local function PackRequest(path, payload)
+    local out = {}
+    if path == "/api/verify" then
+        out.p = "q7"
+        out.a, out.b = payload.key, payload.c
+        out.c, out.d = payload.scriptName, payload.userId
+        out.e, out.f, out.g = payload.Rng1, payload.Rng2, payload.Rng3
+        out.h, out.i, out.j = payload.Rng4, payload.Rng5, payload.RngFloat
+    elseif path == "/api/script" then
+        out.p = "m2"
+        out.a, out.c, out.k = payload.ticket, payload.scriptName, payload.Data
+        out.l, out.m = payload.hop, payload.eq
+    elseif path == "/api/start" then
+        out.p, out.b = "k8", payload.c
+    else
+        return nil
+    end
+    return out
+end
+
 local function postJSON(path, payload, hwid)
     -- Reuse the exact value returned by the executor getter on all requests.
     if type(hwid) ~= "string" or #hwid < 4 or #hwid > 512 then
         return nil, "Executor HWID getter unavailable"
     end
-    local headers = { ["Content-Type"] = "application/json" }
-    if type(hwid) == "string" then headers["x-ms999-hwid"] = hwid end
+    local packed = PackRequest(path, payload)
+    if type(packed) ~= "table" then return nil, "Unsupported request" end
+    local headers = { ["Content-Type"] = "application/json", ["x-r7q"] = hwid }
     local ok, res = pcall(HttpRequest, {
-        Url = BASE_URL .. path,
+        Url = BASE_URL .. "/api/q",
         Method = "POST",
         Headers = headers,
-        Body = EncodeJson(payload),
+        Body = EncodeJson(packed),
     })
     if not ok or type(res) ~= "table" then return nil, "Connection failed" end
     local status = tonumber(res.StatusCode or res.Status)
@@ -400,7 +421,7 @@ local function FetchAndLoad(key, sname)
     print("[999MS] Verifying key...")
 
     local r1, err = postJSON("/api/verify", {
-        key = key, hwid = hwid, userId = userId, scriptName = sname,
+        key = key, c = hwid, userId = userId, scriptName = sname,
         Rng1 = rng.Rng1, Rng2 = rng.Rng2, Rng3 = rng.Rng3,
         Rng4 = rng.Rng4, Rng5 = rng.Rng5, RngFloat = rng.RngFloat,
     }, hwid)
@@ -681,7 +702,7 @@ local function MakeUI()
     buyBtn.MouseButton1Click:Connect(function()
         task.spawn(function()
             local hwid = GetHWID()
-            local r, err = postJSON("/api/start", { hwid = hwid }, hwid)
+            local r, err = postJSON("/api/start", { c = hwid }, hwid)
             if not ChecksActive then return end
             if not r then setStatus(err or "Cannot open link"); return end
             if r.status ~= 200 or not r.data.url then

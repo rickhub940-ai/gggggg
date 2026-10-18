@@ -133,7 +133,9 @@ local gamaramam = { "<base>/<token>" }
 
 - Key/device binding ตรวจผ่าน Platoboost; ไม่เพิ่ม MongoDB/Supabase หรือฐานข้อมูลคีย์ใหม่
 - Client ใช้ `gethwid()`, `get_exwid()` และ aliases (`syn.get_hwid`, `get_hwid`); ถ้า getter ใช้ไม่ได้จะหยุด ไม่ fallback ไป Roblox `GetClientId()`
-- Server ต้องได้ทั้ง explicit HWID (`x-ms999-hwid`/body) และ executor `*-fingerprint` header; ไม่มีค่าใดค่าหนึ่ง = ปฏิเสธ
+- request ใหม่ใช้ endpoint กลาง `/api/q` และ short aliases (`p`, `a`–`o`) ครอบคลุม key, ticket, HWID, script name, hop, RNG และ runtime proof; HWID custom header ใช้ชื่อ `x-r7q` แทนชื่อที่บอกความหมาย
+- Server ยังรับ routes/fields ชื่อเก่าไว้ชั่วคราวสำหรับ client ที่ deploy ไปแล้ว; executor เป็นผู้เติม `*-fingerprint` header เอง จึงเปลี่ยนชื่อจาก Lua ฝั่งเราไม่ได้
+- Server ต้องได้ทั้ง explicit HWID จาก client และ executor fingerprint header; ไม่มีค่าใดค่าหนึ่ง = ปฏิเสธ
 - เนื่องจาก Platoboost รับ identifier เดียว จึงสร้าง `bindingId = SHA256("999MS-device-binding-v1\\0" + canonical(HWID) + "\\0" + canonical(fingerprint))`; `lib/platoboost.js` hash `bindingId` เป็น identifier เดียวที่ส่งให้ provider และ ticket/runtime proof ใช้ hash ของ `bindingId` เดียวกัน
 - ทุก route ที่ใช้ ticket re-resolve HWID+fingerprint; `/api/verify` → `/api/script` → `/api/script-verify` ตรวจ ticket, RNG/equation proof, composite binding และ runtime proof ก่อนยอมให้ client รัน script
 - เปลี่ยน identifier นี้ทำให้ key ที่เคยผูกด้วย HWID อย่างเดียวต้อง rebind/reset ใน Platoboost ก่อน rollout; ห้าม fallback ไปใช้ HWID เดี่ยว เพราะจะทำให้ binding แบบคู่ไม่มีผล
@@ -141,7 +143,7 @@ local gamaramam = { "<base>/<token>" }
 
 แหล่งอ้างอิง: [Shiawase whitelist series](https://shiawase.dev/blog/rblx-auth1), [Luasec](https://github.com/zoolah/Luasec), [Roblox-Whitelist-System](https://github.com/loris1337/Roblox-Whitelist-System). Luasec และ Loris repo ไม่พบ license ที่ระบุสิทธิ์นำโค้ดมาใช้ จึงใช้เป็นข้อมูลศึกษา ไม่คัดลอก implementation; repository Shiawase ระบุ MIT.
 
-**ข้อจำกัด:** fingerprint จาก executor เป็นข้อมูลที่ client ควบคุมหรือปลอมได้ และ client Lua ถูกอ่าน/แก้ไขได้ จึงไม่มีวิธีรับประกัน “100%” ด้วยการตรวจฝั่ง client เพียงอย่างเดียว. `lib/999MS-server-sdk.js` เก็บ hop/replay state ใน memory ของ instance; การกระจายคำขอข้าม Vercel instances อาจกระทบการตรวจแบบ one-time จึงไม่ควรถือว่าเป็น shared durable store.
+**ข้อจำกัด:** ชื่อ field/path แบบ opaque เป็นเพียงการพรางรูปแบบ ไม่ใช่การเข้ารหัส; client Lua ถูกอ่าน/แก้ไขได้ และ fingerprint จาก executor ก็ปลอม/คัดลอกได้ จึงไม่มีวิธีรับประกัน “100%” ด้วยการตรวจฝั่ง client เพียงอย่างเดียว. `lib/999MS-server-sdk.js` เก็บ hop/replay state ใน memory ของ instance; การกระจายคำขอข้าม Vercel instances อาจกระทบการตรวจแบบ one-time จึงไม่ควรถือว่าเป็น shared durable store.
 
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด

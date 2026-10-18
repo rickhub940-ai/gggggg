@@ -58,19 +58,20 @@ local req = I
 if type(req) ~= "function" then return Abort("[999MS] HTTP not supported") end
 local BASE_URL = "https://loader999mss.vercel.app"
 local headers = { ["Content-Type"] = "application/json" }
-if type(HWID) == "string" then headers["x-ms999-hwid"] = HWID end
+if type(HWID) == "string" then headers["x-r7q"] = HWID end
 
 local ok, res = pcall(req, {
-    Url = BASE_URL .. "/api/script-verify",
+    Url = BASE_URL .. "/api/q",
     Method = "POST",
     Headers = headers,
     Body = HttpService:JSONEncode({
-        ticket = Ticket,
-        hwid = HWID,
-        scriptToken = ScriptToken,
-        runtimeSecret = RuntimeSecret,
-        scriptName = ExpectedScript,
-        hop = E or "",
+        p = "x9",
+        a = Ticket,
+        b = HWID,
+        c = ExpectedScript,
+        l = E or "",
+        n = RuntimeSecret,
+        o = ScriptToken,
     }),
 })
 

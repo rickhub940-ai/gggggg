@@ -55,18 +55,20 @@ async function main() {
   // Require both client getter HWID and executor fingerprint. Platoboost gets
   // one versioned composite identifier derived from the pair.
   const pair = resolveHwid({
-    'x-ms999-hwid': ' Native-ID ',
+    'x-r7q': ' Native-ID ',
     'Syn-Fingerprint': ' Executor-ID-01 ',
   }, 'native-id');
   assert.equal(pair.ok, true);
   assert.equal(pair.hwid, 'Native-ID');
   assert.equal(pair.fingerprint, 'Executor-ID-01');
   assert.match(pair.bindingId, /^[a-f0-9]{64}$/);
-  assert.equal(resolveHwid({ 'x-ms999-hwid': 'device-A', 'syn-fingerprint': TEST_FINGERPRINT }, 'device-B').reason,
+  assert.equal(resolveHwid({ 'x-ms999-hwid': 'legacy-id', 'syn-fingerprint': TEST_FINGERPRINT }, 'legacy-id').ok,
+    true, 'server can accept already-deployed legacy clients during transition');
+  assert.equal(resolveHwid({ 'x-r7q': 'device-A', 'syn-fingerprint': TEST_FINGERPRINT }, 'device-B').reason,
     'hwid mismatch', 'rejects conflicting explicit HWID values');
   assert.equal(resolveHwid({ 'syn-fingerprint': TEST_FINGERPRINT }).reason,
     'invalid hwid format', 'fingerprint alone is insufficient');
-  assert.equal(resolveHwid({ 'x-ms999-hwid': 'device-A' }, 'device-A').reason,
+  assert.equal(resolveHwid({ 'x-r7q': 'device-A' }, 'device-A').reason,
     'fingerprint required', 'HWID alone is insufficient');
   assert.equal(resolveHwid({}).reason, 'invalid hwid format',
     'rejects a request without the client getter HWID');
@@ -138,13 +140,15 @@ async function main() {
   assert.equal(healthBody.realtime, undefined, 'health must not advertise realtime');
 
   // `/api/start` requires both signals before calling Platoboost.
-  const startWithFingerprint = await post('/api/start', {}, { 'syn-fingerprint': 'syn-device-01' });
+  const startWithFingerprint = await post('/api/q', { p: 'k8' }, { 'syn-fingerprint': 'syn-device-01' });
   assert.equal(startWithFingerprint.status, 400);
   assert.equal((await startWithFingerprint.json()).error, 'invalid hwid format');
-  const startWithoutFingerprint = await post('/api/start', { hwid: 'start-hwid' }, { 'syn-fingerprint': '' });
+  const startWithoutFingerprint = await post('/api/q', { p: 'k8', b: 'start-hwid' },
+    { 'x-r7q': 'start-hwid', 'syn-fingerprint': '' });
   assert.equal(startWithoutFingerprint.status, 400);
   assert.equal((await startWithoutFingerprint.json()).error, 'fingerprint required');
-  const startWithPair = await post('/api/start', { hwid: 'start-hwid' }, { 'syn-fingerprint': 'syn-device-01' });
+  const startWithPair = await post('/api/q', { p: 'k8', b: 'start-hwid' },
+    { 'x-r7q': 'start-hwid', 'syn-fingerprint': 'syn-device-01' });
   assert.equal(startWithPair.status, 502,
     'a valid pair reaches Platoboost; empty test provider credentials cause the expected provider failure');
 
@@ -176,7 +180,7 @@ async function main() {
   // ── ban enforcement ──
   const banned = await post('/api/admin/ban', { type: 'hwid', value: 'banned-hwid' }, { 'x-admin-token': env.ADMIN_TOKEN });
   assert.equal(banned.status, 200);
-  const bannedVerify = await post('/api/verify', { key: 'KEY_TEST', hwid: 'banned-hwid', scriptName: 'main' });
+  const bannedVerify = await post('/api/verify', { key: 'KEY_TEST', c: 'banned-hwid', scriptName: 'main' });
   assert.equal(bannedVerify.status, 403);
 
   // ── key revocation is opt-in and does not block unrelated keys ──
@@ -187,37 +191,45 @@ async function main() {
   const revokeKeyBody = await revokeKeyResponse.json();
   assert.ok(!revokeKeyBody.value.includes(keyToRevoke), 'admin response must not echo a raw key');
   const revokedKeyVerify = await post('/api/verify', {
-    key: keyToRevoke, hwid: 'revoked-key-test-hwid', scriptName: 'main',
+    key: keyToRevoke, c: 'revoked-key-test-hwid', scriptName: 'main',
   });
   assert.equal(revokedKeyVerify.status, 200);
   assert.equal((await revokedKeyVerify.json()).valid, false);
 
   // ── regression: payload-style /api/verify without RNG still reaches key checks ──
   const payloadStyleVerify = await post('/api/verify', {
-    key: 'KEY_TEST', hwid: 'api-test-hwid', scriptName: 'main', userId: '7',
+    key: 'KEY_TEST', c: 'api-test-hwid', scriptName: 'main', userId: '7',
   });
   const payloadStyleBody = await payloadStyleVerify.json().catch(() => ({}));
   assert.notEqual(payloadStyleBody.error, 'RNG integers rejected',
     'payload-style /api/verify must reach key verification');
 
   const forgedVerify = await post('/api/verify', {
-    key: 'KEY_TEST', hwid: 'api-test-hwid', scriptName: 'main',
+    key: 'KEY_TEST', c: 'api-test-hwid', scriptName: 'main',
     Rng1: 1.5, Rng2: 1, Rng3: 1, Rng4: 1, Rng5: 1, RngFloat: 2,
   });
   assert.equal(forgedVerify.status, 400);
   assert.equal((await forgedVerify.json()).error, 'RNG integers rejected');
 
+  const opaqueVerify = await post('/api/q', {
+    p: 'q7', a: 'KEY_TEST', b: 'api-test-hwid', c: 'main', d: '7',
+    e: 1.5, f: 1, g: 1, h: 1, i: 1, j: 2,
+  }, { 'x-r7q': 'api-test-hwid' });
+  assert.equal(opaqueVerify.status, 400);
+  assert.equal((await opaqueVerify.json()).error, 'RNG integers rejected',
+    'opaque request aliases are decoded before the existing RNG validation');
+
   // ── ticket flow still works without realtime ──
   const hwid = 'api-test-hwid';
   const ticket = issueTicket({ scope: 'script', hwidHash: bindingHash(hwid), userId: '7', scriptName: 'main' });
-  const script = await post('/api/script-verify', {
-    ticket, hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
-  });
+  const script = await post('/api/q', {
+    p: 'x9', a: ticket, b: hwid, c: 'main', l: '', n: 'y'.repeat(64), o: 'x',
+  }, { 'x-r7q': hwid });
   assert.equal(script.status, 409, 'a missing hop is rejected before the proof check');
   assert.equal((await script.json()).diagnostic, 'D2_HOP_MISSING');
 
   const changedFingerprint = await post('/api/script-verify', {
-    ticket, hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
+    ticket, c: hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
   }, { 'syn-fingerprint': 'different-executor-fingerprint' });
   assert.equal(changedFingerprint.status, 403);
   assert.equal((await changedFingerprint.json()).diagnostic, 'D2_DEVICE_BINDING_MISMATCH',
@@ -235,18 +247,18 @@ async function main() {
     'executor fingerprint alone is not accepted as a client getter HWID');
 
   const forgedHop = await post('/api/script-verify', {
-    ticket, hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
+    ticket, c: hwid, scriptToken: 'x', runtimeSecret: 'y'.repeat(64), scriptName: 'main',
     hop: 'f'.repeat(48),
   });
   assert.equal(forgedHop.status, 409, 'a guessed hop is rejected');
 
   // ── /api/script refuses a ticket that never came through /api/verify ──
-  const noHop = await post('/api/script', { ticket, scriptName: 'main' }, { 'x-ms999-hwid': hwid });
+  const noHop = await post('/api/script', { ticket, scriptName: 'main' }, { 'x-r7q': hwid });
   assert.equal(noHop.status, 409, 'script requires a hop issued by verify');
 
   // ── a ticket is worthless on another device ──
   const otherDevice = await post('/api/script', { ticket, scriptName: 'main' },
-    { 'x-ms999-hwid': 'a-different-machine' });
+    { 'x-r7q': 'a-different-machine' });
   assert.equal(otherDevice.status, 403, 'the ticket is bound to the device that earned it');
   assert.equal((await otherDevice.json()).reason, 'device mismatch');
 
@@ -255,7 +267,7 @@ async function main() {
   assert.equal((await noHop.json()).reason, 'hop required');
 
   const guessedHop = await post('/api/script', { ticket, scriptName: 'main', hop: 'a'.repeat(48), eq: 1 },
-    { 'x-ms999-hwid': hwid });
+    { 'x-r7q': hwid });
   assert.equal(guessedHop.status, 409, 'a guessed hop is never accepted');
   assert.equal((await guessedHop.json()).reason, 'hop required');
 
@@ -328,6 +340,18 @@ async function main() {
     'client requires a valid HWID from its getter');
   assert.match(mainForContext, /if type\(HWID\) ~= "string" or #HWID < 4/,
     'final verifier requires the same client getter HWID');
+  assert.match(payloadSource, /\["x-r7q"\]/);
+  assert.match(payloadSource, /Url = BASE_URL \.\. "\/api\/q"/);
+  assert.match(payloadSource, /out\.p = "q7"/);
+  assert.match(payloadSource, /out\.e, out\.f, out\.g = payload\.Rng1, payload\.Rng2, payload\.Rng3/);
+  assert.match(payloadSource, /out\.h, out\.i, out\.j = payload\.Rng4, payload\.Rng5, payload\.RngFloat/);
+  assert.match(mainForContext, /headers\["x-r7q"\]/);
+  assert.match(mainForContext, /Url = BASE_URL \.\. "\/api\/q"/);
+  assert.match(mainForContext, /p = "x9"/);
+  assert.match(payloadSource, /Body = EncodeJson\(packed\)/);
+  const verifierBody = (mainForContext.match(/Body = HttpService:JSONEncode\(\{([\s\S]*?)\}\),/) || [])[1] || '';
+  assert.equal(/\b(ticket|hwid|Rng[1-5F]|scriptName|runtimeSecret|scriptToken)\s*=/.test(verifierBody), false,
+    'outgoing verifier body uses opaque field names');
   assert.match(mainForContext, /local function Abort\(reason\)/,
     'final verification failures use a non-kicking abort');
 

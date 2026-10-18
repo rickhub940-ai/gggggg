@@ -50,6 +50,7 @@ function route(req) {
     '/loadc.lua': ['artifact', 'loadc'],
     '/999MS-sdk.lua': ['artifact', 'sdk'],
     '/api/health': ['health'],
+    '/api/q': ['opaque'],
     '/api/link': ['link-create'],
     '/api/control/bans': ['control-bans'],
     '/api/control/traffic': ['control-traffic'],

@@ -27,6 +27,10 @@
       "dest": "/api/auth?action=health"
     },
     {
+      "src": "/api/q",
+      "dest": "/api/auth?action=opaque"
+    },
+    {
       "src": "/api/control/bans",
       "dest": "/api/auth?action=control-bans"
     },
