@@ -55,7 +55,7 @@ PORT=10000 node server.js
 | เว็บ + API | https://loader999ms.vercel.app | matching fingerprint + HWID + BAD HWID kick, commit `a10803f` (no realtime/WebSocket) |
 | แผงควบคุม | https://loader999ms.vercel.app/control | HTTP only |
 
-Production deploy เป็น commit `a10803f`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`.
+Production deploy เป็น commit `a10803f`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. Runtime/wire scaffold ล่าสุดยังเป็น local และยังไม่ deploy.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -148,6 +148,12 @@ local gamaramam = { "<base>/<token>" }
 - ถ้าค่าไม่ตรง server ปฏิเสธด้วย `BAD HWID : ]` และ client เรียก Kick เฉพาะกรณีนั้น; กรณีปกติไม่ kick
 - Local revision ที่ยังไม่ push/deploy เพิ่มการ patch `RobloxPromptGui` ให้แสดง `[ 999MS ]` / เหตุผล, ลอง `replicatesignal(LocalPlayer.StatsAvailable, "Kick")` แบบ best-effort แล้วเรียก `LocalPlayer:Kick(reason)` เป็น fallback
 - Fingerprint เป็นข้อมูลที่ client ส่งมา ไม่ใช่ hardware attestation; การเปรียบเทียบนี้ไม่ได้ป้องกันการปลอมค่าจาก client ที่ควบคุม request ได้
+
+## 2026-10-19 — Pending local: pre/post runtime gate + wire scaffold
+
+- Local `/api/verify` จะบังคับ challenge ก่อนเรียก Platoboost; `/api/script` ยังคงตรวจ challenge หลังตรวจคีย์ และ `/api/script-verify` ตรวจ runtime proof หลังจากนั้น
+- `pack` / `buildEntries` ถูกเพิ่มเป็น scaffold ตามตัวอย่าง แต่ยังไม่ต่อเข้ากับ live `/api/q` protocol; `__stWireMask` และวิธี derive `wireKey` ยังไม่มี จึงไม่มีการอ้างว่าข้อมูลถูก mask แล้ว
+- การเปลี่ยนชุดนี้ผ่าน tests/build ในเครื่อง แต่ยังไม่ push/deploy; production ยังเป็น `a10803f`
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด
 

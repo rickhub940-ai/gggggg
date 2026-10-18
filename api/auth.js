@@ -626,15 +626,10 @@ async function handleVerify(req, res, ip) {
   const body = req.body || {};
   const { key, userId, scriptName } = body;
   const hwid = body.c ?? body.hwid;
-  // First request challenge: reject a simple forged `{ valid: true }` response
-  // before issuing a signed ticket. The provider still owns key/device binding.
-  // The deployed payload sends its RNG challenge with /api/script (where it is
-  // verified against the decrypted `Data` envelope), so this gate only applies
-  // when the caller actually supplied RNG fields. Requiring them here made real
-  // clients fail with "RNG integers rejected" before their key was ever checked.
-  const challengeFields = ['Rng1', 'Rng2', 'Rng3', 'Rng4', 'Rng5', 'RngFloat'];
-  const challengeSupplied = challengeFields.some((field) => req.body?.[field] !== undefined);
-  const clientChallenge = validateClientChallenge(req.body);
+  // Pre-key runtime challenge: the client must prove its request context before
+  // the provider is consulted. /api/script and /api/script-verify independently
+  // retain the post-key challenge and runtime-proof gates.
+  const clientChallenge = validateClientChallenge(body);
 
   if (typeof key !== 'string' || !key.trim())
     return res.status(400).json({ valid: false, error: 'key required' });
@@ -657,13 +652,14 @@ async function handleVerify(req, res, ip) {
     return res.status(400).json({ valid: false, error: 'scriptName required' });
   if (!isValidScriptName(scriptName))
     return res.status(400).json({ valid: false, error: 'invalid scriptName format' });
-  if (challengeSupplied && !clientChallenge.ok)
-    return res.status(400).json({ valid: false, error: clientChallenge.reason });
-
   const reason = checkRevoked({ hwid: clientHwid, userId, ip });
   if (reason) {
     noteEvent('ban_hit', 'verify | hwid ' + hashHwid(clientHwid).slice(0, 12));
     return res.status(403).json({ valid: false, message: 'Banned: ' + reason });
+  }
+  if (!clientChallenge.ok) {
+    noteEvent('verify_reject', 'pre-key runtime challenge | key ' + hashHwid(key).slice(0, 12));
+    return res.status(400).json({ valid: false, error: clientChallenge.reason });
   }
 
   const result = await verifyKey(key, bindingId);

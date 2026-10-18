@@ -296,6 +296,40 @@ local function EncodeJson(value)
     return "null"
 end
 
+-- Wire-entry scaffold from the proposal. It is intentionally not connected to
+-- the live request format until __stWireMask and wireKey derivation are defined.
+local function pack(...)
+    return { n = select("#", ...), ... }
+end
+
+local function buildEntries(items, clearCount, wireKey)
+    if type(items) ~= "table" then return nil, "Invalid items" end
+    if type(clearCount) ~= "number" or clearCount < 0 then return nil, "Invalid clearCount" end
+
+    local entries = {}
+    local total = 0
+    for index = 1, items.n or #items do
+        local item = items[index]
+        if type(item) ~= "table" then return nil, "Invalid item" end
+
+        local kind, text = item[1], item[2]
+        if type(kind) ~= "number" then return nil, "Invalid kind" end
+        if type(text) ~= "string" then return nil, "Invalid text" end
+
+        if index - 1 > clearCount and #text > 0 then
+            if type(__stWireMask) ~= "function" then return nil, "Mask function unavailable" end
+            local ok, masked = pcall(__stWireMask, text, wireKey, index - 1)
+            if not ok or type(masked) ~= "string" then return nil, "Mask failed" end
+            text = masked
+        end
+
+        if #text > 65535 then return nil, "Text too long" end
+        entries[#entries + 1] = { kind, text }
+        total = total + 3 + #text
+    end
+    return entries, total
+end
+
 -- ═══ POST ═══
 local function AddDeviceParts(out, hwid)
     local value = string.lower((hwid:match("^%s*(.-)%s*$")))

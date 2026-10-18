@@ -221,13 +221,20 @@ async function main() {
   assert.equal(revokedKeyVerify.status, 200);
   assert.equal((await revokedKeyVerify.json()).valid, false);
 
-  // ── regression: payload-style /api/verify without RNG still reaches key checks ──
+  // ── key gate requires a pre-key runtime challenge ──
   const payloadStyleVerify = await post('/api/verify', {
     key: 'KEY_TEST', c: 'api-test-hwid', scriptName: 'main', userId: '7',
   });
-  const payloadStyleBody = await payloadStyleVerify.json().catch(() => ({}));
-  assert.notEqual(payloadStyleBody.error, 'RNG integers rejected',
-    'payload-style /api/verify must reach key verification');
+  assert.equal(payloadStyleVerify.status, 400);
+  assert.equal((await payloadStyleVerify.json()).error, 'RNG integers rejected',
+    'the provider is not consulted unless the pre-key challenge is present and valid');
+
+  const validPreRuntime = await post('/api/verify', {
+    key: 'KEY_TEST', c: 'api-test-hwid', scriptName: 'main', userId: '7',
+    Rng1: 101, Rng2: 202, Rng3: 303, Rng4: 404, Rng5: 505, RngFloat: 2.5,
+  });
+  assert.equal(validPreRuntime.status, 502,
+    'a valid pre-key challenge reaches the provider; empty credentials cause the expected service error');
 
   const forgedVerify = await post('/api/verify', {
     key: 'KEY_TEST', c: 'api-test-hwid', scriptName: 'main',
@@ -392,6 +399,9 @@ async function main() {
     'client requires a valid HWID from its getter');
   assert.match(mainForContext, /if type\(HWID\) ~= "string" or #HWID < 4/,
     'final verifier requires the same client getter HWID');
+  assert.match(payloadSource, /local function pack\(\.\.\.\)/);
+  assert.match(payloadSource, /local function buildEntries\(items, clearCount, wireKey\)/);
+  assert.match(payloadSource, /type\(__stWireMask\) ~= "function"/);
   assert.match(payloadSource, /local function AddDeviceParts\(out, hwid\)/);
   assert.match(payloadSource, /out\.u = hwid/);
   assert.match(payloadSource, /out\.p, out\.a = "q7", payload\.key/);
