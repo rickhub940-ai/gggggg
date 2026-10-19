@@ -3,9 +3,13 @@
 local gamaramam = {
     "@NEXT@"
 }
--- ═══ BODY ═══ everything below is compacted at build time.
+-- The host stays readable/outside obfuscation and is passed into the body.
+local MS999_BASE_URL = "@BASE_URL@"
+-- ═══ BODY ═══ everything below is compacted/obfuscated at build time.
 -- 999MS Bootstrap: essential chain and payload hand-off only.
 -- ===========================================================
+-- Header values arrive after the chain ctx: next url, sha, nonce, base url.
+local msNextUrl, msNextSha, msNextNonce, msBaseUrl = select(2, ...)
 local function Kick(reason)
     local message = tostring(reason or "[999MS] Runtime error")
     local coreGui
@@ -74,7 +78,7 @@ end
 
 if ctx.sourceSaved then return Abort("MS_112") end
 
-local BASE_URL = "@BASE_URL@"
+local BASE_URL = msBaseUrl
 local CHAIN_VERSION = "999MS-chain-v1"
 local CHAIN_TTL = 60
 
@@ -142,9 +146,9 @@ print("[999MS] Loader ready")
 print("[999MS] Fetching payload...")
 -- Stage 4 link: minted by the server while serving this stage, held in the
 -- header table so the marker and the hand-off live in one place.
-local nextSha = "@NEXT_SHA@"
-local nextNonce = "@NONCE@"
-local nextUrl = gamaramam[1]
+local nextSha = msNextSha
+local nextNonce = msNextNonce
+local nextUrl = msNextUrl
 -- "NEXT@" without the leading "@" so this guard is never itself replaced.
 if type(nextUrl) ~= "string" or #nextUrl < 40 or nextUrl:find("NEXT@", 1, true) then
     return Abort("[999MS] Stage link unavailable")
@@ -174,7 +178,7 @@ if not ok or type(response) ~= "table" or status ~= 200 then
 end
 
 local payloadSrc = response.Body or ""
-if #payloadSrc < 100 or #payloadSrc > 512 * 1024 then
+if #payloadSrc < 100 or #payloadSrc > 4 * 1024 * 1024 then
     return Abort("[999MS] Invalid payload size")
 end
 local okHash, digest = pcall(hasher, payloadSrc, "sha256")

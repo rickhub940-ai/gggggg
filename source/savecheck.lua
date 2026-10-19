@@ -6,8 +6,9 @@
 local gamaramam = {
     "@NEXT@"
 }
--- ═══ BODY ═══ everything below is compacted at build time.
-local ctx = ...
+-- ═══ BODY ═══ everything below is compacted/obfuscated at build time.
+-- The build wrapper passes the readable header values after the chain ctx.
+local ctx, msNextUrl, msNextSha, msNextNonce = ...
 if type(ctx) ~= "table" then error("MS999:CHAIN_CONTEXT_MISSING", 0) end
 local function Abort(reason)
     local stop = type(ctx) == "table" and ctx.stopChecks or nil
@@ -379,9 +380,9 @@ if not requestFn then return Abort("HTTP request API unavailable") end
 
 -- The server mints the Stage-3 link while serving this stage and writes it
 -- into the header table above; it is valid for ten seconds from that moment.
-local nextSha = "@NEXT_SHA@"
-local nextNonce = "@NONCE@"
-local nextUrl = gamaramam[1]
+local nextSha = msNextSha
+local nextNonce = msNextNonce
+local nextUrl = msNextUrl
 -- "NEXT@" without the leading "@" so this guard is never itself replaced.
 if type(nextUrl) ~= "string" or #nextUrl < 40 or nextUrl:find("NEXT@", 1, true) then
     return Abort("[999MS] Stage link unavailable")
@@ -412,7 +413,7 @@ if not ok or type(response) ~= "table" or status ~= 200 then
 end
 
 local body = response.Body or ""
-if #body > 256 * 1024 then return Abort("[999MS] Loader response too large") end
+if #body > 4 * 1024 * 1024 then return Abort("[999MS] Loader response too large") end
 local okHash, digest = pcall(hasher, body, "sha256")
 if not okHash or type(digest) ~= "string" or string.lower(digest) ~= nextSha then
     return Abort("[999MS] Loader integrity check failed")

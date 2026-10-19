@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-10-19T15:25:26.525Z",
+  "engine": "plain",
+  "obfuscated": false,
+  "files": {
+    "loada": {
+      "file": "loada.lua",
+      "sha256": "a424541a93b11116ddb9c485ad3ed94cb230ceaf2ac40d0d83eee91fc9e94b7d",
+      "bytes": 8991,
+      "obfuscated": false,
+      "engine": "plain"
+    },
+    "loader": {
+      "file": "loader.lua",
+      "sha256": "2c602655c0ce902d4321f8f6d042aef9ec1025dff0f86b22d15b4296692bdc38",
+      "bytes": 4931,
+      "obfuscated": false,
+      "engine": "plain"
+    },
+    "payload": {
+      "file": "payload.lua",
+      "sha256": "3273e8c1c7ac59748614531c243ba04e286a094c684552c148e791bd654148d5",
+      "bytes": 18841,
+      "obfuscated": false,
+      "engine": "plain"
+    },
+    "loadc": {
+      "file": "loadc.lua",
+      "sha256": "6c1817c1d6ed37b5cf84b400a26a0f07d124e1ee1fdc2bf3487e23153747bbd8",
+      "bytes": 2205,
+      "obfuscated": false,
+      "engine": "plain"
+    },
+    "sdk": {
+      "file": "999MS-sdk.lua",
+      "sha256": "6c82e1714a0aafd562ccaed8545d670612297f89ea1c8344f19ffe4bc0b88a39",
+      "bytes": 294017,
+      "obfuscated": true,
+      "engine": "prebuilt"
+    }
+  }
+}

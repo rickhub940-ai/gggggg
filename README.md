@@ -7,20 +7,43 @@
 
 ```
 api/auth.js          ตัวจัดการทุก route (Vercel function)
-source/              ซอร์ส Lua ที่อ่านได้ของทุก stage + build.js
-artifacts/           ผล build ที่เสิร์ฟจริง (สร้างด้วย `node source/build.js`)
+source/              ซอร์ส Lua ของทุก stage + build.js + obf-build.js
+source/stage-layout.js  แยก header ที่อ่านได้ออกจาก body ที่จะ obfuscate
+artifacts/           ผล build แบบ plain (สร้างด้วย `node source/build.js`)
+obf/                 ผล build ที่ obfuscate แล้ว (สร้างด้วย `node source/obf-build.js`)
 scripts/main.lua     สคริปต์ปลายทางที่เสิร์ฟผ่าน /api/script
 web/                 หน้าเว็บหลัก (/) และแผงควบคุม (/control)
 server.js            รัน local ได้เหมือน Vercel
 test/api.test.js     ทดสอบ endpoint
+test/obf.test.js     ทดสอบ layout, WRD client และ artifact ที่ build แล้ว
 ```
 
 ## Build + test
 
 ```bash
 node source/build.js     # source/*.lua -> artifacts/*.lua
-npm test                 # ทดสอบ API (ไม่ต้องมี network)
+npm test                 # ทดสอบ API + obf build (ไม่ต้องมี network)
 ```
+
+## Obfuscation
+
+ทุก stage แยกเป็น 2 ส่วน: **header** ที่เก็บ placeholder (`@NEXT@`, `@NEXT_SHA@`,
+`@NONCE@`, `@BASE_URL@`, `__STAGE2_*__`, `${SCRIPTID}`) ไว้ให้อ่านได้ และ **body**
+ที่ถูก obfuscate ทั้งก้อน ตอน build จะประกอบกลับเป็นไฟล์เดียวโดย header ยังอยู่
+ด้านบนเสมอ ทำให้ server แทนค่า token ได้โดยไม่ต้อง obfuscate ซ้ำ
+
+```bash
+npm run obf:wearedevs                    # POST จริงไปที่ wearedevs.net/api/obfuscate
+PROMETHEUS_LUA=/path/to/lua \
+  PROMETHEUS_DIR=/path/to/Prometheus \
+  npm run obf:prometheus -- --preset Strong
+npm run obf                              # auto: wearedevs -> prometheus -> local
+ARTIFACT_DIR=obf node server.js          # เสิร์ฟชุดที่ obfuscate แล้ว
+```
+
+ผลลัพธ์อยู่ใน `obf/` พร้อม `manifest.json` (sha256 ของทุกไฟล์) และ `obf/999ms-obf.zip`
+ถ้าใช้ `ARTIFACT_DIR=obf` ตัว `loadc.lua` จะถูกเสิร์ฟแบบ pre-obfuscated
+(แทน placeholder ใน header ตรง ๆ ไม่เรียก obfuscator ตอน request)
 
 ## รันlocal
 

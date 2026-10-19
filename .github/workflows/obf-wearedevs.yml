@@ -1,0 +1,59 @@
+name: Obfuscate stages with WeAreDevs
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: "Obfuscation engine"
+        type: choice
+        options: [wearedevs, prometheus, local, auto]
+        default: wearedevs
+  # Merging a pull request whose subject contains [obf] also runs the job, so a
+  # real POST can be made from a network that reaches wearedevs.net.
+  push:
+    branches: [main]
+    paths:
+      - "source/**"
+      - ".github/workflows/obf-wearedevs.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  obfuscate:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[obf]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build plain stage artifacts
+        run: node source/build.js
+
+      - name: Obfuscate (${{ inputs.engine || 'wearedevs' }})
+        env:
+          WEARE_API_URL: https://wearedevs.net/api/obfuscate
+          WEARE_API_TIMEOUT_MS: "180000"
+        run: node source/obf-build.js --engine "${{ inputs.engine || 'wearedevs' }}" --no-zip
+
+      - name: Show manifest
+        run: cat obf/manifest.json
+
+      - name: Show output heads
+        run: for f in obf/loada.lua obf/loader.lua obf/payload.lua obf/loadc.lua obf/scripts/main.lua; do echo "== $f $(wc -c < "$f") bytes"; head -2 "$f"; done
+
+      - name: Verify the built chain
+        run: npm test
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: obf-${{ inputs.engine || 'wearedevs' }}
+          path: obf/
+          retention-days: 14
