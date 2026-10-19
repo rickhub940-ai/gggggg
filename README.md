@@ -1,7 +1,7 @@
 # 999MS — loader, key API และแผงควบคุม
 
 โปรเจกต์นี้คือ **ตัวล่าสุด** (`loader999mss-source-no-obf-txt`) ที่นำมาแทนของเดิมทั้งหมด
-`loadc` เป็น stage เดียวที่ obfuscate; stages 2–4 เป็น Lua อ่านได้สำหรับตรวจและแก้ไข
+ซอร์สทุก stage ยังอ่านได้ใน `source/`; build จะ obfuscate body ของ Stages 2–4 และคง header ของ Stage 2/3 ไว้ที่ byte 0 ส่วน `loadc` จะ obfuscate ต่อ request
 
 ## โครงสร้าง
 
@@ -22,6 +22,11 @@ node source/build.js     # source/*.lua -> artifacts/*.lua
 npm test                 # ทดสอบ API (ไม่ต้องมี network)
 ```
 
+## Current chain artifacts
+- `source/` remains readable for editing. `node source/build.js` compacts and obfuscates Stage 2–4 bodies.
+- Stage 2/3 headers are restored after obfuscation; runtime literals such as `@NEXT@`, `@NEXT_SHA@`, and `@NONCE@` stay visible for request-time substitution.
+- Stage 2 save-file detection checks only the `local gamaramam` marker at byte zero; it does not validate braces, URL, or token format.
+
 ## รันlocal
 
 ```bash
@@ -37,7 +42,7 @@ PORT=10000 node server.js
 | `/control` | แผงควบคุม client (ต้อง `ADMIN_TOKEN`) |
 | `/api/health` | สถานะระบบ (ไม่ต้อง auth) |
 | `/loadc.lua` | stage 1 — render จาก template ทุก request |
-| `/<token>` (stage 2–4) | ใช้ token ที่ระบบออกให้ตามลำดับ stage; stages 2–4 อ่านได้ |
+| `/<token>` (stage 2–4) | ใช้ token ที่ระบบออกให้ตามลำดับ stage; body ของ artifacts obfuscated, header Stage 2/3 ยังอ่านได้ |
 | `/api/verify` `/api/script` `/api/script-verify` `/api/heartbeat` | flow คีย์ → ticket → runtime proof |
 | `/api/control/bans` `/api/control/events` `/api/control/traffic` `/api/link` | API ของแผงควบคุม (ต้อง `ADMIN_TOKEN`) |
 
@@ -122,12 +127,12 @@ Stage 2/3 เริ่มต้นด้วย readable marker ที่ build �
 local gamaramam = { "<base>/<token>" }
 ```
 
-- token เป็น next-stage link ที่ออกใหม่ทุก run; savecheck ตรวจรูปแบบ marker และ handoff URL แต่ไม่ฝัง/เปรียบเทียบ token คงที่
+- token เป็น next-stage link ที่ออกใหม่ทุก run; savecheck ตรวจแค่ `local gamaramam` ที่ byte 0 ของไฟล์ โดยไม่ตรวจ `{}`, URL หรือรูปแบบ token
 - ตรวจเฉพาะไฟล์ที่เริ่มด้วย marker นี้; ไม่ flag ไฟล์อื่นจากข้อความที่ฝังอยู่ข้างใน
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
 - การตรวจไฟล์ยังยึด marker ที่ byte 0 และ handoff URL ที่ถูกต้อง; ไม่ flag ไฟล์อื่นเพราะมีข้อความคล้าย marker ฝังอยู่ข้างใน
-- Production `d9718be` เพิ่ม outbound guard สำหรับ `print`/`warn`/console, HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ) และ clipboard APIs (`setclipboard`, `toclipboard`, `set_clipboard`): สแกน string/table หา header marker เต็มพร้อม next-link token ที่รูปแบบถูกต้องได้ทุกตำแหน่ง; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
+- Outbound guard สำหรับ `print`/`warn`/console, HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ) และ clipboard APIs (`setclipboard`, `toclipboard`, `set_clipboard`) สแกน string/table หา `local gamaramam`; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
 - Hook ทำงานแบบ best-effort ตามความสามารถ executor และเก็บ guard ไว้หลัง payload เริ่มทำงาน; ไม่ได้ hook RemoteEvent/RemoteFunction หรือ arbitrary Lua function ทุกตัว และตรวจ marker ที่ถูก encode/compress ไม่ได้; table ที่ลึกเกิน 6 ชั้นหรือเกิน 1,024 entries จะ block แบบ fail-closed
 
 ## 2026-10-18 — HWID-only binding, 5 Base64 parts + ignored raw decoy (deployed `ba0738f`)

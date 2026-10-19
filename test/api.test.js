@@ -507,19 +507,23 @@ async function main() {
   const STAGE2 = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loada.lua'), 'utf8');
   assert.equal(/supper_Boom|super_boom/i.test(STAGE2), false, 'the old literal is gone');
   assert.equal(STAGE2.includes('__CHAIN_MARKER__'), false, 'the marker is not a serve-time token');
-  // The next-stage link lives in a one-entry table that the build keeps outside
-  // the compacted body, so the name and the link stay readable.
+  // The generated header keeps the next-stage link readable; the detector also
+  // accepts a direct string assignment without table braces.
   assert.ok(STAGE2.startsWith('local gamaramam = { "@NEXT@" };'),
     'the header is exactly `local gamaramam = { "<link>" }`');
   const savecheckSource = fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8');
-  assert.ok(savecheckSource.includes('firstLine:sub(1, #HEAD_LINE) ~= HEAD_LINE'),
-    'save detection only accepts the marker at byte zero');
-  assert.ok(savecheckSource.includes('local savedLink = firstLine:match'),
-    'save detection validates the hand-off URL on the marker line');
-  assert.equal(savecheckSource.includes('text:find(HEAD_LINE, 1, true)'), false,
-    'file save detection must remain anchored and not match buried marker text');
+  assert.ok(savecheckSource.includes('local MARKER_NAME = "local gamaramam"'),
+    'the detector keys on the gamaramam marker name');
+  assert.ok(savecheckSource.includes('return firstLine:sub(1, #MARKER_NAME) == MARKER_NAME'),
+    'file save detection checks only the marker name at byte zero');
+  assert.ok(savecheckSource.includes('return text:find(MARKER_NAME, 1, true) ~= nil'),
+    'outbound data checks only for the marker name');
+  assert.equal(savecheckSource.includes('@BASE_URL@'), false,
+    'Stage 2 marker detection does not depend on a base URL placeholder');
+  assert.equal(savecheckSource.includes('local function isNormalUrl'), false,
+    'the detector does not validate the link or token after the marker');
   assert.match(savecheckSource, /local function hasMarkerInText\(text\)/,
-    'outbound data scans for the full marker header anywhere in values');
+    'outbound data scans for the marker name anywhere in values');
   assert.match(savecheckSource, /local function hookOutboundApis\(\)/);
   assert.match(savecheckSource, /local function hookRawset\(targetFunction\)/);
   assert.match(savecheckSource, /hookRawset\(rawset\)/);
@@ -537,8 +541,8 @@ async function main() {
   assert.match(savecheckSource, /LocalPlayer:Kick\(reason\)/);
   assert.match(savecheckSource, /CoreGui:FindFirstChild\("RobloxPromptGui"\)/);
   assert.ok(STAGE2.includes('MS_112'), 'the built Stage 2 carries the kick reason');
-  assert.ok(STAGE2.includes(`'local gamaramam = { "'`),
-    'the save marker is that header line, with the token left out of the needle');
+  assert.ok(STAGE2.includes('local gamaramam'),
+    'the save detector recognizes the marker assignment name');
   assert.ok(/gamaramam\s*\[/.test(STAGE2), 'the body reads the table instead of copying it');
   assert.equal((STAGE2.match(/gamaramam/g) || []).length >= 3, true,
     'the name survives compaction');
@@ -621,8 +625,8 @@ async function main() {
   for (const [label, body] of [['stage 2', stage2], ['stage 3', stage3]]) {
     assert.equal(body.includes('find(' + String.fromCharCode(34) + stage3Url + String.fromCharCode(34)),
       false, label + ' must not embed its next URL inside a find() guard');
-    assert.ok(body.includes('find("NEXT@",1,true)') || body.includes('find("NEXT@", 1, true)'),
-      label + ' keeps the unresolved-slot guard readable');
+    assert.ok(body.includes('find("NEXT@",') || body.includes("find('NEXT@',"),
+      label + ' keeps the unresolved-slot sentinel readable');
   }
 
   const stage4Url = (stage3.match(LINK) || [])[0];

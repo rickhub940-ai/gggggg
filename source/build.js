@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Builds plain-text (non-obfuscated) chain artifacts from source/*.lua.
+ * Builds compact, obfuscated Stage 2-4 artifacts from readable source/*.lua.
+ * Stage 2/3 headers stay readable and are prepended after obfuscating bodies.
  *   source/savecheck.lua -> artifacts/loada.lua    (Stage 2)
  *   source/loader.lua    -> artifacts/loader.lua   (Stage 3)
  *   source/payload.lua   -> artifacts/payload.lua  (Stage 4)
@@ -11,6 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const luamin = require('luamin');
+const { obfuscate } = require('lua-obfuscator');
 
 const root = path.join(__dirname, '..');
 const read = (name) => fs.readFileSync(path.join(root, 'source', name), 'utf8');
@@ -18,9 +20,8 @@ const write = (name, body) => fs.writeFileSync(path.join(root, 'artifacts', name
 
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
 
-// Every shipped stage is emitted on a single line with 2-character locals.
-// The source files in source/ stay readable for maintenance; only the
-// artifacts are compacted here.
+// Keep source files readable for maintenance. Compact all generated bodies,
+// then obfuscate Stages 2-4 while preserving runtime literals and gamaramam.
 const compact = (text, name) => {
   const out = luamin.minify(text);
   if (typeof out !== 'string' || out.length === 0)
@@ -29,13 +30,30 @@ const compact = (text, name) => {
   return out;
 };
 
-// Stage 2 keeps a literal placeholder that api/auth.js replaces per request
-// with the host the executor actually reached.
+const OBFUSCATION_STEPS = Object.freeze([
+  { name: 'RenameVariables' },
+  { name: 'NumbersToExpressions' },
+  { name: 'InsertJunk' },
+]);
+
+function obfuscateBody(text, name) {
+  const minified = compact(text, name);
+  const out = obfuscate(minified, 'luaU', { steps: OBFUSCATION_STEPS, minify: true });
+  if (typeof out !== 'string' || out.length <= minified.length)
+    throw new Error(`${name}: obfuscator returned no obfuscated output`);
+  if (out.includes('\n')) throw new Error(`${name}: obfuscated output must be a single line`);
+  for (const token of minified.match(/@[A-Z0-9_]+@/g) || []) {
+    if (!out.includes(token)) throw new Error(`${name}: obfuscator changed runtime literal ${token}`);
+  }
+  if (/\bgamaramam\b/.test(minified) && !/\bgamaramam\b/.test(out))
+    throw new Error(`${name}: obfuscator changed the gamaramam handoff reference`);
+  return out;
+}
+
 // Stage 2 is built in two parts: the HEADER block (marker + next-stage link,
-// kept verbatim so the name and literals stay readable) and the BODY, which is
-// compacted. @BASE_URL@ stays unresolved so the server can fill it per host.
+// kept verbatim) and the BODY, which is compacted then obfuscated. The save detector checks
+// only the marker name; it does not depend on a base-URL placeholder.
 const stage2Raw = read('savecheck.lua');
-if (!stage2Raw.includes('@BASE_URL@')) throw new Error('savecheck.lua missing @BASE_URL@');
 
 const headerEnd = stage2Raw.indexOf('-- ═══ BODY ═══');
 if (headerEnd < 0) throw new Error('savecheck.lua missing the BODY marker');
@@ -54,7 +72,7 @@ if (!/^local gamaramam\s*=/.test(header)) throw new Error('header must declare g
 if (!/^local gamaramam = \{ "@NEXT@" \}$/.test(header)) throw new Error('header must be a one-entry gamaramam table');
 if (!header.includes('"@NEXT@"')) throw new Error('header lost the next-link slot');
 
-const stage2 = `${header};${compact(bodySource, 'savecheck.lua')}`;
+const stage2 = `${header};${obfuscateBody(bodySource, 'savecheck.lua')}`;
 if (!/local gamaramam\s*=/.test(stage2)) throw new Error('stage 2 dropped the header table');
 if (!/gamaramam\s*\[/.test(stage2)) throw new Error('body no longer reads the header table');
 if (!stage2.includes('local gamaramam = { "')) throw new Error('body lost the save marker needle');
@@ -82,7 +100,7 @@ function splitHeader(source, raw, marker) {
 {
   const raw = read('loader.lua');
   const { header, body } = splitHeader('loader.lua', raw, '-- ═══ BODY ═══');
-  const out = `${header};${compact(body, 'loader.lua')}`;
+  const out = `${header};${obfuscateBody(body, 'loader.lua')}`;
   write('loader.lua', out);
   console.log('stage   loader.lua    ', out.length, 'bytes');
 }
@@ -91,7 +109,7 @@ function splitHeader(source, raw, marker) {
 {
   const raw = read('payload.lua');
   if (!raw.includes('@BASE_URL@')) throw new Error('payload.lua missing @BASE_URL@');
-  const body = compact(raw, 'payload.lua');
+  const body = obfuscateBody(raw, 'payload.lua');
   write('payload.lua', body);
   console.log('stage   payload.lua   ', body.length, 'bytes');
 }
