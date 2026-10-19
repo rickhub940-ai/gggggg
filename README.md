@@ -42,7 +42,7 @@ PORT=10000 node server.js
 | `/api/control/bans` `/api/control/events` `/api/control/traffic` `/api/link` | API ของแผงควบคุม (ต้อง `ADMIN_TOKEN`) |
 
 ## หมายเหตุ
-- Anti-save ใน Stage 2 (`loada`) ถือว่าเจอ literal `local gamaramam` ตรงไหนก็ได้ในเนื้อหาไฟล์เป็นไฟล์ที่ต้อง kick; ไม่ตรวจ URL, braces หรือ token format
+- Anti-save ใน Stage 2 (`loada`) ตรวจทุก entry ที่ `listfiles(".")` คืนมาโดยไม่มีเพดานจำนวนรายการ; อ่านไฟล์แล้วตรวจเฉพาะเนื้อหาตั้งแต่ 50 KiB ขึ้นไป หากพบ literal `local gamaramam` ตรงไหนก็ kick โดยไม่ตรวจ URL, braces หรือ token format. การสแกนเป็น root listing แบบ best-effort ไม่ได้ไล่ recursive
 - Stage 1 pin SHA-256 ของ Stage 2 ที่ render แล้ว
 - UA trap ของ artifact เป็น opt-in: `TRAP_BROWSER_ARTIFACTS=1`
 
@@ -126,7 +126,7 @@ local gamaramam = { "<base>/<token>" }
 - ตรวจเฉพาะไฟล์ที่เริ่มด้วย marker นี้; ไม่ flag ไฟล์อื่นจากข้อความที่ฝังอยู่ข้างใน
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
-- การตรวจไฟล์นับว่าพบ `local gamaramam` ตรงไหนก็ได้ในไฟล์เป็น marker; ไม่ตรวจ URL, braces หรือรูปแบบ token
+- การตรวจทุก entry ที่ `listfiles(".")` คืนมาไม่มีเพดานจำนวน; จะอ่านและค้นหา marker เฉพาะไฟล์ตั้งแต่ 50 KiB ขึ้นไป และไม่ตรวจ URL, braces หรือรูปแบบ token; การสแกนไม่ recursive
 - Production `d9718be` เพิ่ม outbound guard สำหรับ `print`/`warn`/console, HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ) และ clipboard APIs (`setclipboard`, `toclipboard`, `set_clipboard`): สแกน string/table หา header marker เต็มพร้อม next-link token ที่รูปแบบถูกต้องได้ทุกตำแหน่ง; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
 - Hook ทำงานแบบ best-effort ตามความสามารถ executor และเก็บ guard ไว้หลัง payload เริ่มทำงาน; ไม่ได้ hook RemoteEvent/RemoteFunction หรือ arbitrary Lua function ทุกตัว และตรวจ marker ที่ถูก encode/compress ไม่ได้; table ที่ลึกเกิน 6 ชั้นหรือเกิน 1,024 entries จะ block แบบ fail-closed
 

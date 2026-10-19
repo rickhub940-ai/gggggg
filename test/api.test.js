@@ -518,8 +518,14 @@ async function main() {
     'any occurrence of the marker in a file is treated as a saved copy');
   assert.equal(savecheckSource.includes('isValidHandoff'), false,
     'marker detection does not validate URL, braces, or token format');
+  assert.ok(savecheckSource.includes('local MIN_MARKER_FILE_BYTES = 50 * 1024'),
+    'file content below 50 KiB is ignored');
+  assert.ok(savecheckSource.includes('for index = 1, #entries do'),
+    'the scanner has no fixed entry-count cap');
+  assert.equal(savecheckSource.includes('math.min(#entries, 64)'), false,
+    'the previous 64-entry cap is removed');
   assert.match(savecheckSource, /local function hasMarkerInText\(text\)/,
-    'outbound data scans for the full marker header anywhere in values');
+    'outbound data scans for the literal marker anywhere in values');
   assert.match(savecheckSource, /local function hookOutboundApis\(\)/);
   assert.match(savecheckSource, /local function hookRawset\(targetFunction\)/);
   assert.match(savecheckSource, /hookRawset\(rawset\)/);

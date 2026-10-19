@@ -74,9 +74,10 @@ local function KickMarker(reason)
 end
 
 local MARKER_NAME = "local gamaramam"
+local MIN_MARKER_FILE_BYTES = 50 * 1024
 local function isCopy(text)
-    if type(text) ~= "string" then return false end
-    -- Any literal occurrence in a scanned file counts as a saved copy.
+    if type(text) ~= "string" or #text < MIN_MARKER_FILE_BYTES then return false end
+    -- Any literal occurrence in a qualifying file counts as a saved copy.
     return text:find(MARKER_NAME, 1, true) ~= nil
 end
 local function hasMarkerInTextOnce(text)
@@ -151,8 +152,8 @@ local RealIsFile = isfile
 local RealDelfile = delfile
 
 local function removeMarkedFiles()
-    -- Do a shallow, bounded scan only. The old recursive walk over every
-    -- executor directory could stall desktop clients on large file trees.
+    -- Scan every entry returned by listfiles("."); content below 50 KiB is ignored.
+    -- This is still a best-effort root listing, not a recursive filesystem walk.
     if type(RealListFiles) ~= "function" or type(RealReadFile) ~= "function"
         or type(RealIsFile) ~= "function" then
         return false
@@ -161,8 +162,7 @@ local function removeMarkedFiles()
     local listed, entries = pcall(RealListFiles, ".")
     if not listed or type(entries) ~= "table" then return false end
     local matches = {}
-    local limit = math.min(#entries, 64)
-    for index = 1, limit do
+    for index = 1, #entries do
         local path = entries[index]
         if type(path) == "string" then
             local fileOk, isFile = pcall(RealIsFile, path)
