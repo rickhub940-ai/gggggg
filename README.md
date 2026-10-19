@@ -1,7 +1,7 @@
 # 999MS — loader, key API และแผงควบคุม
 
 โปรเจกต์นี้คือ **ตัวล่าสุด** (`loader999mss-source-no-obf-txt`) ที่นำมาแทนของเดิมทั้งหมด
-ไฟล์ Stage 2–4 ที่เสิร์ฟมาจาก Centurion-obfuscated outputs ที่ผู้ใช้ให้ไว้ใน `obfuscated/`; build เพียงประกอบ header ที่จำเป็น ไม่ได้อ่านหรือ obfuscate `source/*.lua`. `loadc` คง flow obfuscate ต่อ request ตามเดิม
+ซอร์สทุก stage ยังอ่านได้ใน `source/`; build จะ obfuscate body ของ Stages 2–4 และคง header ของ Stage 2/3 ไว้ที่ byte 0 ส่วน `loadc` จะ obfuscate ต่อ request
 
 ## โครงสร้าง
 
@@ -18,14 +18,14 @@ test/api.test.js     ทดสอบ endpoint
 ## Build + test
 
 ```bash
-node source/build.js     # obfuscated/*.lua -> artifacts/*.lua (copy + Stage 2/3 header)
+node source/build.js     # source/*.lua -> artifacts/*.lua
 npm test                 # ทดสอบ API (ไม่ต้องมี network)
 ```
 
 ## Current chain artifacts
-- `obfuscated/` stores the supplied Centurion v6.3 outputs. The build copies those bytes unchanged and prepends `local gamaramam = { "@NEXT@" };` only to Stage 2/3; Stage 4 has no header.
-- The Stage 2–4 input files contain none of the literal runtime placeholders (`@NEXT_SHA@`, `@NONCE@`, `@BASE_URL@`) or the marker name in their obfuscated bodies. The API can replace only visible literal slots, so those body substitutions are not verified and may not work with these outputs.
-- `source/` remains available as readable reference but is not used to regenerate Stage 2–4 artifacts. No Lua runtime chain execution has been performed.
+- `source/` remains readable for editing. `node source/build.js` compacts and obfuscates Stage 2–4 bodies.
+- Stage 2/3 headers are restored after obfuscation; runtime literals such as `@NEXT@`, `@NEXT_SHA@`, and `@NONCE@` stay visible for request-time substitution.
+- Stage 2 save-file detection checks only the `local gamaramam` marker at byte zero; it does not validate braces, URL, or token format.
 
 ## รันlocal
 
@@ -47,7 +47,7 @@ PORT=10000 node server.js
 | `/api/control/bans` `/api/control/events` `/api/control/traffic` `/api/link` | API ของแผงควบคุม (ต้อง `ADMIN_TOKEN`) |
 
 ## หมายเหตุ
-- Runtime API แทนเฉพาะ placeholder ที่ยังเป็น literal อยู่ใน artifact; Centurion outputs ที่ให้มาชุดนี้ไม่มี `@BASE_URL@`, `@NEXT_SHA@` หรือ `@NONCE@` แบบ literal จึงยังยืนยันการแทนค่าเหล่านั้นไม่ได้
+- `@BASE_URL@` ใน source ถูกแทนด้วย host ที่ executor เรียกเข้ามาจริง (ทำงานบน preview/โดเมนใหม่ได้)
 - Stage 1 pin SHA-256 ของ Stage 2 ที่ render แล้ว
 - UA trap ของ artifact เป็น opt-in: `TRAP_BROWSER_ARTIFACTS=1`
 
@@ -57,10 +57,10 @@ PORT=10000 node server.js
 
 | บริการ | ที่อยู่ | สถานะ |
 |---|---|---|
-| เว็บ + API | https://loader999mss.vercel.app | API health 200; user-supplied Centurion v6.3 Stage 2–4 artifacts; no realtime/WebSocket |
+| เว็บ + API | https://loader999mss.vercel.app | matching fingerprint + HWID, BAD HWID/MS_112 kick, Stage 2 rawset + outbound marker/clipboard guards, License/Script positional call (no realtime/WebSocket) |
 | แผงควบคุม | https://loader999mss.vercel.app/control | HTTP only |
 
-Production มี user-supplied Centurion v6.3 outputs สำหรับ Stage 2–4; `/api/health` ตอบ HTTP 200. API tests ตรวจการส่งต่อ artifacts และ header เท่านั้น ไม่ได้ execute Lua stages หรือยืนยันว่า body ภายในทำงานกับ runtime placeholders.
+Production deploy ล่าสุดมี code commit `ea01868` และ `/api/health` ตอบ HTTP 200: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. เว็บไซต์และ `/control` ใช้ positional `License`, `Script`; outbound marker/clipboard guard และ Stage 2 rawset guard อยู่ใน production แล้ว ส่วน provider-reported key-binding mismatch ยังไม่รวมใน revision นี้.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -68,7 +68,7 @@ Production มี user-supplied Centurion v6.3 outputs สำหรับ Stage 
 
 โปรเจกต์ `loader999mss` ผูกกับ repo **`rickhub940-ai/whilstkey`** สาขา `main` แล้ว
 → `git push origin main` = Vercel build + deploy production ให้เอง
-(ยืนยัน auto-deploy ของ revision ปัจจุบัน: deployment READY และ `/api/health` ตอบ 200)
+(ยืนยัน auto-deploy: code commit `ea01868` ขึ้น production READY และ `/api/health` ตอบ 200)
 
 (Render deploy จาก repo นั้น)
 
