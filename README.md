@@ -1,7 +1,7 @@
 # 999MS — loader, key API และแผงควบคุม
 
 โปรเจกต์นี้คือ **ตัวล่าสุด** (`loader999mss-source-no-obf-txt`) ที่นำมาแทนของเดิมทั้งหมด
-ไฟล์ Stage 2–4 ที่เสิร์ฟมาจาก Centurion-obfuscated outputs ที่ผู้ใช้ให้ไว้ใน `obfuscated/`; build เพียงประกอบ header ที่จำเป็น ไม่ได้อ่านหรือ obfuscate `source/*.lua`. `loadc` คง flow obfuscate ต่อ request ตามเดิม
+`loadc` เป็น stage เดียวที่ obfuscate; stages 2–4 เป็น Lua อ่านได้สำหรับตรวจและแก้ไข
 
 ## โครงสร้าง
 
@@ -18,15 +18,9 @@ test/api.test.js     ทดสอบ endpoint
 ## Build + test
 
 ```bash
-node source/build.js     # obfuscated/*.lua -> artifacts/*.lua (copy + Stage 2/3 header)
+node source/build.js     # source/*.lua -> artifacts/*.lua
 npm test                 # ทดสอบ API (ไม่ต้องมี network)
 ```
-
-## Current chain artifacts
-- `obfuscated/` stores the supplied Centurion v6.3 outputs. The build copies those bytes unchanged and prepends `local gamaramam = { "@NEXT@" };` only to Stage 2/3; Stage 4 has no header.
-- The Stage 2–4 input files contain none of the literal runtime placeholders (`@NEXT_SHA@`, `@NONCE@`, `@BASE_URL@`) or the marker name in their obfuscated bodies. The API can replace only visible literal slots, so those body substitutions are not verified and may not work with these outputs.
-- Stage 1 and the readable Stage 2 source now allow responses up to 512 KiB. The supplied artifacts are about 444 KB / 351 KB / 455 KB; the Stage 2 obfuscated body's internal size guard remains opaque and is not verified by API tests.
-- `source/` remains available as readable reference but is not used to regenerate Stage 2–4 artifacts. No Lua runtime chain execution has been performed.
 
 ## รันlocal
 
@@ -43,12 +37,12 @@ PORT=10000 node server.js
 | `/control` | แผงควบคุม client (ต้อง `ADMIN_TOKEN`) |
 | `/api/health` | สถานะระบบ (ไม่ต้อง auth) |
 | `/loadc.lua` | stage 1 — render จาก template ทุก request |
-| `/<token>` (stage 2–4) | ใช้ token ที่ระบบออกให้ตามลำดับ stage; body ของ artifacts obfuscated, header Stage 2/3 ยังอ่านได้ |
+| `/<token>` (stage 2–4) | ใช้ token ที่ระบบออกให้ตามลำดับ stage; stages 2–4 อ่านได้ |
 | `/api/verify` `/api/script` `/api/script-verify` `/api/heartbeat` | flow คีย์ → ticket → runtime proof |
 | `/api/control/bans` `/api/control/events` `/api/control/traffic` `/api/link` | API ของแผงควบคุม (ต้อง `ADMIN_TOKEN`) |
 
 ## หมายเหตุ
-- Runtime API แทนเฉพาะ placeholder ที่ยังเป็น literal อยู่ใน artifact; Centurion outputs ที่ให้มาชุดนี้ไม่มี `@BASE_URL@`, `@NEXT_SHA@` หรือ `@NONCE@` แบบ literal จึงยังยืนยันการแทนค่าเหล่านั้นไม่ได้
+- `@BASE_URL@` ใน source ถูกแทนด้วย host ที่ executor เรียกเข้ามาจริง (ทำงานบน preview/โดเมนใหม่ได้)
 - Stage 1 pin SHA-256 ของ Stage 2 ที่ render แล้ว
 - UA trap ของ artifact เป็น opt-in: `TRAP_BROWSER_ARTIFACTS=1`
 
@@ -58,10 +52,10 @@ PORT=10000 node server.js
 
 | บริการ | ที่อยู่ | สถานะ |
 |---|---|---|
-| เว็บ + API | https://loader999mss.vercel.app | API health 200; user-supplied Centurion v6.3 Stage 2–4 artifacts; no realtime/WebSocket |
+| เว็บ + API | https://loader999mss.vercel.app | matching fingerprint + HWID, BAD HWID/MS_112 kick, outbound marker/clipboard guard, License/Script positional call, commit `d9718be` (no realtime/WebSocket) |
 | แผงควบคุม | https://loader999mss.vercel.app/control | HTTP only |
 
-Production มี user-supplied Centurion v6.3 outputs สำหรับ Stage 2–4; `/api/health` ตอบ HTTP 200. API tests ตรวจการส่งต่อ artifacts และ header เท่านั้น ไม่ได้ execute Lua stages หรือยืนยันว่า body ภายในทำงานกับ runtime placeholders.
+Production deploy เป็น commit `d9718be`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. เว็บไซต์และ `/control` ใช้ positional `License`, `Script`; outbound marker/clipboard guard อยู่ใน production แล้ว ส่วน kick สำหรับ provider-reported key-binding mismatch และ rawset detection ล่าสุดยังเป็น local และยังไม่ deploy.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -69,7 +63,7 @@ Production มี user-supplied Centurion v6.3 outputs สำหรับ Stage 
 
 โปรเจกต์ `loader999mss` ผูกกับ repo **`rickhub940-ai/whilstkey`** สาขา `main` แล้ว
 → `git push origin main` = Vercel build + deploy production ให้เอง
-(ยืนยัน auto-deploy ของ revision ปัจจุบัน: deployment READY และ `/api/health` ตอบ 200)
+(ยืนยันล่าสุด: commit `d9718be` ถูก build และขึ้น production โดยไม่ได้สั่ง deploy ด้วยมือ)
 
 (Render deploy จาก repo นั้น)
 
@@ -128,12 +122,12 @@ Stage 2/3 เริ่มต้นด้วย readable marker ที่ build �
 local gamaramam = { "<base>/<token>" }
 ```
 
-- token เป็น next-stage link ที่ออกใหม่ทุก run; savecheck ตรวจแค่ `local gamaramam` ที่ byte 0 ของไฟล์ โดยไม่ตรวจ `{}`, URL หรือรูปแบบ token
+- token เป็น next-stage link ที่ออกใหม่ทุก run; savecheck ตรวจรูปแบบ marker และ handoff URL แต่ไม่ฝัง/เปรียบเทียบ token คงที่
 - ตรวจเฉพาะไฟล์ที่เริ่มด้วย marker นี้; ไม่ flag ไฟล์อื่นจากข้อความที่ฝังอยู่ข้างใน
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
 - การตรวจไฟล์ยังยึด marker ที่ byte 0 และ handoff URL ที่ถูกต้อง; ไม่ flag ไฟล์อื่นเพราะมีข้อความคล้าย marker ฝังอยู่ข้างใน
-- Outbound guard สำหรับ `print`/`warn`/console, HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ) และ clipboard APIs (`setclipboard`, `toclipboard`, `set_clipboard`) สแกน string/table หา `local gamaramam`; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
+- Production `d9718be` เพิ่ม outbound guard สำหรับ `print`/`warn`/console, HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ) และ clipboard APIs (`setclipboard`, `toclipboard`, `set_clipboard`): สแกน string/table หา header marker เต็มพร้อม next-link token ที่รูปแบบถูกต้องได้ทุกตำแหน่ง; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
 - Hook ทำงานแบบ best-effort ตามความสามารถ executor และเก็บ guard ไว้หลัง payload เริ่มทำงาน; ไม่ได้ hook RemoteEvent/RemoteFunction หรือ arbitrary Lua function ทุกตัว และตรวจ marker ที่ถูก encode/compress ไม่ได้; table ที่ลึกเกิน 6 ชั้นหรือเกิน 1,024 entries จะ block แบบ fail-closed
 
 ## 2026-10-18 — HWID-only binding, 5 Base64 parts + ignored raw decoy (deployed `ba0738f`)
@@ -163,12 +157,13 @@ local gamaramam = { "<base>/<token>" }
 - `pack` / `buildEntries` เป็น scaffold เท่านั้น ยังไม่ต่อเข้ากับ live `/api/q` protocol; `__stWireMask` และวิธี derive `wireKey` ยังไม่มี จึงไม่มีการอ้างว่าข้อมูลถูก mask แล้ว
 - Stage 3 (`loader.lua`) เตะเมื่อพบ error/exception; Stage 1 (`loadc.template.lua`) ไม่มีระบบเตะ
 
-## Local-only — provider-reported key-binding mismatch
+## Local pending — key-binding mismatch, rawset hook, and kick prompt text
 
 - เมื่อ HWID กับ fingerprint ตรงกัน API จะตั้งสถานะ mismatch เฉพาะเมื่อ Platoboost ส่งข้อความชัดเจน `this key has already been redeemed to a different identifier`; client จึงเตะด้วย reason ตรงตัว `invalid Hwid`
 - คีย์ผิด/หมดอายุ, rate limit หรือปัญหาบริการทั่วไปจะไม่ถูกตีความเป็น HWID mismatch
-- Stage 2 rawset hook อยู่ใน production artifact แล้ว: hook ได้เท่าที่ executor อนุญาต; call ปกติก็อาจถูก block/เตะ และ executor ที่ไม่มีหรือหลบ hook ได้ยัง bypass ได้ จึงเป็น best-effort ไม่ใช่ security guarantee
-- สำหรับ handler ที่เตะ ใช้ prompt `[ 999MS ]`, ลอง `replicatesignal(LocalPlayer.StatsAvailable, "Kick")` แบบ best-effort และ fallback ไป `LocalPlayer:Kick(reason)`
+- Local-only เพิ่ม hook สำหรับ global `rawset` และ `debug.rawset`: ทุก call ที่ hook ได้จะ block และเตะ `rawset detected`; โค้ดที่ใช้ `rawset` อย่างปกติก็จะโดนด้วย และ executor ที่ไม่มี/หลบ hook ได้ยัง bypass ได้
+- ข้อความหน้าต่างเตะของทุก handler ที่มีอยู่ขึ้นต้นด้วย `You have been kicked by this experience or its moderators. Moderation message:` แล้วตามด้วยเหตุผลจริง; `Player:Kick(reason)` และรูปแบบหัวข้อ `[ 999MS ]` ยังคงเดิม
+- การเปลี่ยนชุดนี้ยังเป็น local; outbound marker/clipboard guard อยู่ใน production `d9718be` แล้ว
 
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด

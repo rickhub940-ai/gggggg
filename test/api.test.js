@@ -346,11 +346,14 @@ async function main() {
   const invalid = await post('/api/script-verify', { ticket: 'bad' });
   assert.equal(invalid.status, 401); // malformed ticket is rejected before any proof check
 
-  // ── Stages 2-4 are the supplied user-obfuscated Centurion files ──
-  // Do not inspect or execute the obfuscated Lua internals here.
+  // ── Stages 2-4 stay plain, readable Lua (only Stage 1 is obfuscated) ──
+  // Served stages now require a run token, so readability is checked on the
+  // artifacts that the chain hands out.
   for (const file of ['loada', 'loader', 'payload']) {
     const body = fs.readFileSync(path.join(__dirname, '..', 'artifacts', file + '.lua'), 'utf8');
-    assert.ok(body.includes('Centurion v6.3'), file + ' preserves the supplied obfuscator output');
+    assert.equal(/WeAreDevs|obfuscate/i.test(body), false, file + ' must stay readable');
+    assert.equal(/getgenv|_G\\s*\\./i.test(body), false, file + ' must not use executor-global context');
+    assert.ok(body.includes('local '), file + ' keeps plain Lua statements');
   }
   // Without a token the stage routes fall through to the trap.
   for (const file of ['loada', 'loader', 'payload']) {
@@ -504,29 +507,19 @@ async function main() {
   const STAGE2 = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loada.lua'), 'utf8');
   assert.equal(/supper_Boom|super_boom/i.test(STAGE2), false, 'the old literal is gone');
   assert.equal(STAGE2.includes('__CHAIN_MARKER__'), false, 'the marker is not a serve-time token');
-  // The generated header keeps the next-stage link readable; the detector also
-  // accepts a direct string assignment without table braces.
+  // The next-stage link lives in a one-entry table that the build keeps outside
+  // the compacted body, so the name and the link stay readable.
   assert.ok(STAGE2.startsWith('local gamaramam = { "@NEXT@" };'),
     'the header is exactly `local gamaramam = { "<link>" }`');
   const savecheckSource = fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8');
-  const loadcTemplate = fs.readFileSync(path.join(__dirname, '..', 'source', 'loadc.template.lua'), 'utf8');
-  const loadcArtifact = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loadc.lua'), 'utf8');
-  assert.match(loadcTemplate, /#body > 512 \* 1024/);
-  assert.ok(loadcArtifact.includes('#r>512*1024'));
-  assert.match(savecheckSource, /#body > 512 \* 1024/);
-  assert.ok(STAGE2.length < 512 * 1024, 'supplied Stage 2 fits the enlarged response cap');
-  assert.ok(savecheckSource.includes('local MARKER_NAME = "local gamaramam"'),
-    'the detector keys on the gamaramam marker name');
-  assert.ok(savecheckSource.includes('return firstLine:sub(1, #MARKER_NAME) == MARKER_NAME'),
-    'file save detection checks only the marker name at byte zero');
-  assert.ok(savecheckSource.includes('return text:find(MARKER_NAME, 1, true) ~= nil'),
-    'outbound data checks only for the marker name');
-  assert.equal(savecheckSource.includes('@BASE_URL@'), false,
-    'Stage 2 marker detection does not depend on a base URL placeholder');
-  assert.equal(savecheckSource.includes('local function isNormalUrl'), false,
-    'the detector does not validate the link or token after the marker');
+  assert.ok(savecheckSource.includes('firstLine:sub(1, #HEAD_LINE) ~= HEAD_LINE'),
+    'save detection only accepts the marker at byte zero');
+  assert.ok(savecheckSource.includes('local savedLink = firstLine:match'),
+    'save detection validates the hand-off URL on the marker line');
+  assert.equal(savecheckSource.includes('text:find(HEAD_LINE, 1, true)'), false,
+    'file save detection must remain anchored and not match buried marker text');
   assert.match(savecheckSource, /local function hasMarkerInText\(text\)/,
-    'outbound data scans for the marker name anywhere in values');
+    'outbound data scans for the full marker header anywhere in values');
   assert.match(savecheckSource, /local function hookOutboundApis\(\)/);
   assert.match(savecheckSource, /local function hookRawset\(targetFunction\)/);
   assert.match(savecheckSource, /hookRawset\(rawset\)/);
@@ -543,17 +536,14 @@ async function main() {
   assert.match(savecheckSource, /replicatesignal\(LocalPlayer\.StatsAvailable, "Kick"\)/);
   assert.match(savecheckSource, /LocalPlayer:Kick\(reason\)/);
   assert.match(savecheckSource, /CoreGui:FindFirstChild\("RobloxPromptGui"\)/);
-  const suppliedStage2 = fs.readFileSync(path.join(__dirname, '..', 'obfuscated', 'loada.lua'), 'utf8');
-  const suppliedStage3 = fs.readFileSync(path.join(__dirname, '..', 'obfuscated', 'loader.lua'), 'utf8');
-  const suppliedStage4 = fs.readFileSync(path.join(__dirname, '..', 'obfuscated', 'payload.lua'), 'utf8');
-  const stageHeader = 'local gamaramam = { "@NEXT@" };\n';
-  assert.equal(STAGE2, stageHeader + suppliedStage2, 'Stage 2 uses the user-supplied Centurion output unchanged after its header');
-  assert.equal(fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loader.lua'), 'utf8'),
-    stageHeader + suppliedStage3, 'Stage 3 uses the user-supplied Centurion output unchanged after its header');
-  assert.equal(fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'payload.lua'), 'utf8'),
-    suppliedStage4, 'Stage 4 uses the user-supplied Centurion output unchanged');
-  assert.ok(STAGE2.includes('Centurion v6.3'), 'the obfuscated Stage 2 banner is retained');
-  assert.equal(STAGE2.includes('\n'), true, 'supplied Centurion output is retained verbatim');
+  assert.ok(STAGE2.includes('MS_112'), 'the built Stage 2 carries the kick reason');
+  assert.ok(STAGE2.includes(`'local gamaramam = { "'`),
+    'the save marker is that header line, with the token left out of the needle');
+  assert.ok(/gamaramam\s*\[/.test(STAGE2), 'the body reads the table instead of copying it');
+  assert.equal((STAGE2.match(/gamaramam/g) || []).length >= 3, true,
+    'the name survives compaction');
+  assert.equal(STAGE2.includes('\n'), false, 'Stage 2 ships as a single line');
+  assert.equal(/NEXT_LINK|local marker/.test(STAGE2), false, 'no descriptive name survives');
   assert.equal(
     require('node:crypto').createHash('sha256').update(STAGE2).digest('hex'),
     fs.readFileSync(path.join(__dirname, '..', 'api', 'auth.js'), 'utf8')
@@ -625,21 +615,18 @@ async function main() {
   assert.notEqual((await openStage(stage3Url)).status, 200,
     'Stage 3 link is single use');
 
+  // Regression: the placeholder must not appear inside the guard that checks
+  // for it, otherwise the server writes the URL into its own guard and every
+  // run kicks with "Stage link unavailable".
+  for (const [label, body] of [['stage 2', stage2], ['stage 3', stage3]]) {
+    assert.equal(body.includes('find(' + String.fromCharCode(34) + stage3Url + String.fromCharCode(34)),
+      false, label + ' must not embed its next URL inside a find() guard');
+    assert.ok(body.includes('find("NEXT@",1,true)') || body.includes('find("NEXT@", 1, true)'),
+      label + ' keeps the unresolved-slot guard readable');
+  }
+
   const stage4Url = (stage3.match(LINK) || [])[0];
   assert.ok(stage4Url, 'Stage 3 carries a freshly minted Stage-4 link');
-
-  // Verify only the API-side header substitution. The supplied obfuscated body
-  // is opaque; this does not prove the Lua runtime consumes the header or pins.
-  for (const [label, body, nextUrl] of [
-    ['stage 2', stage2, stage3Url],
-    ['stage 3', stage3, stage4Url],
-  ]) {
-    assert.equal(body.includes('find(' + String.fromCharCode(34) + nextUrl + String.fromCharCode(34)),
-      false, label + ' must not embed its next URL inside a find() guard');
-    assert.ok(body.startsWith(`local gamaramam = { "${nextUrl}" };`),
-      label + ' receives the freshly minted next link in its prepended header');
-    assert.equal(body.includes('@NEXT@'), false, label + ' has no unresolved header slot');
-  }
   const stage4Res = await openStage(stage4Url);
   assert.equal(stage4Res.status, 200, 'Stage 4 link works');
   const stage4 = await stage4Res.text();

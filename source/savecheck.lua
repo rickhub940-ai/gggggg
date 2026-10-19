@@ -1,8 +1,8 @@
 -- Stage 2: detect only marked copies and hand off without blocking the client.
 -- ═══ HEADER ═══ kept verbatim and outside the compacted body.
 -- The one entry is the request for the next stage link; the line it forms,
--- `local gamaramam = { "<link>" }`, is also what a dumped copy of this
--- stage starts with. The detector accepts a normal URL with or without braces.
+-- `local gamaramam = { "<base>/<token>" }`, is also what a dumped copy of this
+-- stage starts with, so it doubles as the save marker.
 local gamaramam = {
     "@NEXT@"
 }
@@ -73,16 +73,35 @@ local function KickMarker(reason)
     end
 end
 
-local MARKER_NAME = "local gamaramam"
+local BASE_URL = "@BASE_URL@"
+-- A dumped copy begins with the header line above. The token after the base
+-- URL is different on every run, so the comparison stops before it.
+local HEAD_LINE = 'local gamaramam = { "' .. BASE_URL .. "/"
+local function isValidHandoff(savedLink)
+    if type(savedLink) ~= "string" or savedLink:sub(1, #HEAD_LINE) ~= HEAD_LINE then return false end
+    local token = savedLink:sub(#HEAD_LINE + 1)
+    local chainId, expiresAt, signature = token:match("^([a-f0-9]+)%.(%d+)%.([a-f0-9]+)$")
+    return chainId ~= nil and #chainId == 32 and #expiresAt == 13 and #signature == 32
+end
 local function isCopy(text)
     if type(text) ~= "string" then return false end
-    -- File detection stays anchored at byte zero and checks only the marker name.
+    -- File detection remains anchored at byte zero: an embedded marker in an
+    -- unrelated file is not treated as a saved stage.
     local firstLine = text:match("^[^\r\n]*") or ""
-    return firstLine:sub(1, #MARKER_NAME) == MARKER_NAME
+    if firstLine:sub(1, #HEAD_LINE) ~= HEAD_LINE then return false end
+    local savedLink = firstLine:match('^local gamaramam = { "([^"]+)" }')
+    return isValidHandoff(savedLink)
 end
-
 local function hasMarkerInTextOnce(text)
-    return text:find(MARKER_NAME, 1, true) ~= nil
+    local searchFrom = 1
+    while searchFrom <= #text do
+        local markerAt = text:find(HEAD_LINE, searchFrom, true)
+        if not markerAt then break end
+        local savedLink = text:sub(markerAt):match('^local gamaramam = { "([^"\r\n]+)" }')
+        if isValidHandoff(savedLink) then return true end
+        searchFrom = markerAt + #HEAD_LINE
+    end
+    return false
 end
 local function hasMarkerInText(text)
     if type(text) ~= "string" then return false end
@@ -305,7 +324,7 @@ end
 
 -- File and outbound monitors are best-effort: executors without hookfunction/
 -- newcclosure still run. File checks stay byte-zero anchored; outbound checks
--- look for the gamaramam assignment paired with a normal HTTP(S) URL.
+-- require a complete marker header with a valid handoff token.
 if target and type(hookfunction) == "function" and type(newcclosure) == "function" then
     local hookOk, original = pcall(function()
         return hookfunction(target, newcclosure(function(path, contents, ...)
@@ -414,7 +433,7 @@ if not ok or type(response) ~= "table" or status ~= 200 then
 end
 
 local body = response.Body or ""
-if #body > 512 * 1024 then return Abort("[999MS] Loader response too large") end
+if #body > 256 * 1024 then return Abort("[999MS] Loader response too large") end
 local okHash, digest = pcall(hasher, body, "sha256")
 if not okHash or type(digest) ~= "string" or string.lower(digest) ~= nextSha then
     return Abort("[999MS] Loader integrity check failed")
