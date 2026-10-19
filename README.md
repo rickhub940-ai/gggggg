@@ -57,10 +57,10 @@ PORT=10000 node server.js
 
 | บริการ | ที่อยู่ | สถานะ |
 |---|---|---|
-| เว็บ + API | https://loader999mss.vercel.app | matching fingerprint + HWID, BAD HWID/MS_112 kick, outbound marker/clipboard guard, License/Script positional call, commit `d9718be` (no realtime/WebSocket) |
+| เว็บ + API | https://loader999mss.vercel.app | matching fingerprint + HWID, BAD HWID/MS_112 kick, Stage 2 rawset + outbound marker/clipboard guards, License/Script positional call (no realtime/WebSocket) |
 | แผงควบคุม | https://loader999mss.vercel.app/control | HTTP only |
 
-Production deploy เป็น commit `d9718be`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. เว็บไซต์และ `/control` ใช้ positional `License`, `Script`; outbound marker/clipboard guard อยู่ใน production แล้ว ส่วน kick สำหรับ provider-reported key-binding mismatch และ rawset detection ล่าสุดยังเป็น local และยังไม่ deploy.
+Production deploy ล่าสุดมี code commit `ea01868` และ `/api/health` ตอบ HTTP 200: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. เว็บไซต์และ `/control` ใช้ positional `License`, `Script`; outbound marker/clipboard guard และ Stage 2 rawset guard อยู่ใน production แล้ว ส่วน provider-reported key-binding mismatch ยังไม่รวมใน revision นี้.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -68,7 +68,7 @@ Production deploy เป็น commit `d9718be`: server ตรวจ HWID จา
 
 โปรเจกต์ `loader999mss` ผูกกับ repo **`rickhub940-ai/whilstkey`** สาขา `main` แล้ว
 → `git push origin main` = Vercel build + deploy production ให้เอง
-(ยืนยันล่าสุด: commit `d9718be` ถูก build และขึ้น production โดยไม่ได้สั่ง deploy ด้วยมือ)
+(ยืนยัน auto-deploy: code commit `ea01868` ขึ้น production READY และ `/api/health` ตอบ 200)
 
 (Render deploy จาก repo นั้น)
 
@@ -162,13 +162,12 @@ local gamaramam = { "<base>/<token>" }
 - `pack` / `buildEntries` เป็น scaffold เท่านั้น ยังไม่ต่อเข้ากับ live `/api/q` protocol; `__stWireMask` และวิธี derive `wireKey` ยังไม่มี จึงไม่มีการอ้างว่าข้อมูลถูก mask แล้ว
 - Stage 3 (`loader.lua`) เตะเมื่อพบ error/exception; Stage 1 (`loadc.template.lua`) ไม่มีระบบเตะ
 
-## Local pending — key-binding mismatch, rawset hook, and kick prompt text
+## Local-only — provider-reported key-binding mismatch
 
 - เมื่อ HWID กับ fingerprint ตรงกัน API จะตั้งสถานะ mismatch เฉพาะเมื่อ Platoboost ส่งข้อความชัดเจน `this key has already been redeemed to a different identifier`; client จึงเตะด้วย reason ตรงตัว `invalid Hwid`
 - คีย์ผิด/หมดอายุ, rate limit หรือปัญหาบริการทั่วไปจะไม่ถูกตีความเป็น HWID mismatch
-- Local-only เพิ่ม hook สำหรับ global `rawset` และ `debug.rawset`: ทุก call ที่ hook ได้จะ block และเตะ `rawset detected`; โค้ดที่ใช้ `rawset` อย่างปกติก็จะโดนด้วย และ executor ที่ไม่มี/หลบ hook ได้ยัง bypass ได้
-- ข้อความหน้าต่างเตะของทุก handler ที่มีอยู่ขึ้นต้นด้วย `You have been kicked by this experience or its moderators. Moderation message:` แล้วตามด้วยเหตุผลจริง; `Player:Kick(reason)` และรูปแบบหัวข้อ `[ 999MS ]` ยังคงเดิม
-- การเปลี่ยนชุดนี้ยังเป็น local; outbound marker/clipboard guard อยู่ใน production `d9718be` แล้ว
+- Stage 2 rawset hook อยู่ใน production artifact แล้ว: hook ได้เท่าที่ executor อนุญาต; call ปกติก็อาจถูก block/เตะ และ executor ที่ไม่มีหรือหลบ hook ได้ยัง bypass ได้ จึงเป็น best-effort ไม่ใช่ security guarantee
+- สำหรับ handler ที่เตะ ใช้ prompt `[ 999MS ]`, ลอง `replicatesignal(LocalPlayer.StatsAvailable, "Kick")` แบบ best-effort และ fallback ไป `LocalPlayer:Kick(reason)`
 
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด
