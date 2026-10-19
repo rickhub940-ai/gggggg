@@ -1,0 +1,45 @@
+name: Obfuscate stages with WeAreDevs
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine:
+        description: "Obfuscation engine"
+        type: choice
+        options: [wearedevs, prometheus, local, auto]
+        default: wearedevs
+
+permissions:
+  contents: read
+
+jobs:
+  obfuscate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build plain stage artifacts
+        run: node source/build.js
+
+      - name: Obfuscate (${{ inputs.engine }})
+        env:
+          WEARE_API_URL: https://wearedevs.net/api/obfuscate
+          WEARE_API_TIMEOUT_MS: "120000"
+        run: node source/obf-build.js --engine "${{ inputs.engine }}" --no-zip
+
+      - name: Show manifest
+        run: cat obf/manifest.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: obf-${{ inputs.engine }}
+          path: obf/
+          retention-days: 14
