@@ -157,11 +157,12 @@ local gamaramam = { "<base>/<token>" }
 - `pack` / `buildEntries` เป็น scaffold เท่านั้น ยังไม่ต่อเข้ากับ live `/api/q` protocol; `__stWireMask` และวิธี derive `wireKey` ยังไม่มี จึงไม่มีการอ้างว่าข้อมูลถูก mask แล้ว
 - Stage 3 (`loader.lua`) เตะเมื่อพบ error/exception; Stage 1 (`loadc.template.lua`) ไม่มีระบบเตะ
 
-## Local pending — kick เมื่อคีย์ผูกกับ HWID อื่น
+## Local pending — key-binding mismatch, rawset hook, and kick prompt text
 
 - เมื่อ HWID กับ fingerprint ตรงกัน API จะตั้งสถานะ mismatch เฉพาะเมื่อ Platoboost ส่งข้อความชัดเจน `this key has already been redeemed to a different identifier`; client จึงเตะด้วย reason ตรงตัว `invalid Hwid`
 - คีย์ผิด/หมดอายุ, rate limit หรือปัญหาบริการทั่วไปจะไม่ถูกตีความเป็น HWID mismatch
 - Local-only เพิ่ม hook สำหรับ global `rawset` และ `debug.rawset`: ทุก call ที่ hook ได้จะ block และเตะ `rawset detected`; โค้ดที่ใช้ `rawset` อย่างปกติก็จะโดนด้วย และ executor ที่ไม่มี/หลบ hook ได้ยัง bypass ได้
+- ข้อความหน้าต่างเตะของทุก handler ที่มีอยู่ขึ้นต้นด้วย `You have been kicked by this experience or its moderators. Moderation message:` แล้วตามด้วยเหตุผลจริง; `Player:Kick(reason)` และรูปแบบหัวข้อ `[ 999MS ]` ยังคงเดิม
 - การเปลี่ยนชุดนี้ยังเป็น local; outbound marker/clipboard guard อยู่ใน production `d9718be` แล้ว
 
 

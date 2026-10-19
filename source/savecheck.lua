@@ -23,7 +23,7 @@ local function KickMarker(reason)
     pcall(function() CoreGui = game:GetService("CoreGui") end)
     pcall(function() LocalPlayer = game:GetService("Players").LocalPlayer end)
     local customTitle = "[ 999MS ]"
-    local customMessage = "Reason :  " .. reason
+    local customMessage = "You have been kicked by this experience or its moderators. Moderation message:\n\n" .. reason
 
     local function patchErrorPrompt()
         local success, result = pcall(function()

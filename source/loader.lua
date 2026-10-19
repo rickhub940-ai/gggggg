@@ -23,7 +23,7 @@ local function Kick(reason)
             local text = errorFrame and errorFrame:FindFirstChild("ErrorMessage")
             if title and text then
                 title.Text = "[ 999MS ]"
-                text.Text = "Reason :  " .. message
+                text.Text = "You have been kicked by this experience or its moderators. Moderation message:\n\n" .. message
             end
         end)
     end

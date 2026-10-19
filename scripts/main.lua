@@ -118,7 +118,7 @@ local function KickBadHwid(reason)
     local CoreGui = game:GetService("CoreGui")
     local LocalPlayer = game:GetService("Players").LocalPlayer
     local customTitle = "[ 999MS ]"
-    local customMessage = "Reason :  " .. reason
+    local customMessage = "You have been kicked by this experience or its moderators. Moderation message:\n\n" .. reason
 
     local function patchErrorPrompt()
         local success, result = pcall(function()

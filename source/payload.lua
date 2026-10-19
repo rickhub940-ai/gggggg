@@ -472,7 +472,7 @@ local function KickBadHwid(reason, deviceMismatch)
     local Players = game:GetService("Players")
     local LocalPlayer = Players.LocalPlayer
     local customTitle = "[ 999MS ]"
-    local customMessage = "Reason :  " .. kickReason
+    local customMessage = "You have been kicked by this experience or its moderators. Moderation message:\n\n" .. kickReason
 
     local function patchErrorPrompt()
         local success, result = pcall(function()

@@ -405,6 +405,8 @@ async function main() {
   assert.match(mainForContext, /diagnostic == "BAD HWID : \]"/);
   assert.equal((loaderSources.match(/replicatesignal\s*\(/g) || []).length, 4,
     'all four kick handlers include the executor signal attempt');
+  assert.equal((loaderSources.match(/You have been kicked by this experience or its moderators\. Moderation message:\\n\\n/g) || []).length, 4,
+    'all four existing kick handlers prefix the standard experience-kick notice');
   assert.match(payloadSource, /if type\(replicatesignal\) == "function" then/);
   assert.match(mainForContext, /if type\(replicatesignal\) == "function" then/);
   assert.match(payloadSource, /LocalPlayer\.StatsAvailable, "Kick"/);
