@@ -107,12 +107,12 @@ https://<host>/x/<40 hex สุ่ม>?at=<exp base36>.<sig 32 ตัว>
 ไม่ใช้ `getgenv()` หรือ `_G` เป็นที่เก็บสถานะระหว่าง stage แล้ว ตัว entry รับค่าเป็นอาร์กิวเมนต์ และส่งต่อผ่าน context แบบ local จนถึง payload/main:
 
 ```lua
-local key = "ABC"
-local script = "Main"
-loadstring(game:HttpGet("https://example.com/<generated-link>"))(key, script)
+local License = ""
+local Script = ""
+loadstring(game:HttpGet("https://loader999mss.vercel.app/loadc.lua"))(License, Script)
 ```
 
-บรรทัดที่สร้างจาก `/control` จะใส่ `key = ""` ให้แก้เป็นคีย์จริง และตั้งชื่อสคริปต์ตามลิงก์ที่เลือกไว้ การแก้ source แล้วสร้าง artifacts ใหม่ให้ใช้ `node source/build.js` จากนั้นรัน `npm test`.
+ใส่คีย์ใน `License`; `Script` ว่างจะใช้ `main` โดยค่าเริ่มต้น ส่วน `/control` ยังคงสร้าง URL เฉพาะของแต่ละลิงก์ แต่ใช้รูปแบบ positional arguments เดียวกัน (`License`, `Script`).
 
 ## 2026-10-18 — save marker + next-link handoff
 

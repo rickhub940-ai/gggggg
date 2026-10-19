@@ -252,7 +252,9 @@
       </div>
       <div class="code-body">
 <span class="c">-- วางใน executor แล้วกด Execute</span><br />
-<span class="p">loadstring(</span><span class="f">game:HttpGet</span>(<span class="s" id="scriptUrl">"https://loader999mss.vercel.app/loadc.lua"</span><span class="p">))()</span>
+<span class="p">local License = ""</span><br />
+<span class="p">local Script = ""</span><br />
+<span class="p">loadstring(</span><span class="f">game:HttpGet</span>(<span class="s" id="scriptUrl">"https://loader999mss.vercel.app/loadc.lua"</span><span class="p">))(License, Script)</span>
       </div>
       <div class="copy-row">
         <button class="btn" id="copyCard" type="button">คัดลอกโค้ด</button>
@@ -442,7 +444,7 @@
     ? location.host
     : FALLBACK_HOST;
   var url = 'https://' + host + '/loadc.lua';
-  var command = 'loadstring(game:HttpGet("' + url + '"))()';
+  var command = 'local License = ""\nlocal Script = ""\nloadstring(game:HttpGet("' + url + '"))(License, Script)';
 
   var scriptUrlEl = document.getElementById('scriptUrl');
   if (scriptUrlEl) scriptUrlEl.textContent = '"' + url + '"';

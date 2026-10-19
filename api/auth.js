@@ -300,7 +300,7 @@ async function handleLinkCreate(req, res) {
     id: link.linkId(linkPath),
     path: `/x/${linkPath}`,
     url,
-    line: `local key = ""\nlocal script = ${JSON.stringify(scriptName)}\nloadstring(game:HttpGet("${url}"))(key, script)`,
+    line: `local License = ""\nlocal Script = ${JSON.stringify(scriptName)}\nloadstring(game:HttpGet("${url}"))(License, Script)`,
     sha256: digest,
     scriptName,
     expiresAt,

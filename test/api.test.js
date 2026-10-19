@@ -449,10 +449,10 @@ async function main() {
   assert.equal(linkBody.ok, true);
   assert.match(linkBody.path, /^\/x\/[a-f0-9]{40}$/, 'link path must be 40 random hex');
   assert.match(linkBody.url, /^http[^?]+\/x\/[a-f0-9]{40}\?at=[0-9a-z]+\.[A-Za-z0-9_-]{32}$/);
-  assert.ok(linkBody.line.startsWith('local key = ""\nlocal script = "main"\n'));
+  assert.ok(linkBody.line.startsWith('local License = ""\nlocal Script = "main"\n'));
   assert.match(linkBody.line, /loadstring\(game:HttpGet\("/);
-  assert.match(linkBody.line, /\)\(key, script\)$/);
-  assert.match(linkBody.stub, /local key = \"\"[\s\S]*local script = \"main\"[\s\S]*chunk\(key, script\)/);
+  assert.match(linkBody.line, /\)\(License, Script\)$/);
+  assert.match(linkBody.stub, /local License = \"\"[\s\S]*local Script = \"main\"[\s\S]*chunk\(License, Script\)/);
   assert.match(linkBody.sha256, /^[a-f0-9]{64}$/);
   assert.ok(linkBody.stub.includes(linkBody.url), 'stub carries the link');
   assert.ok(linkBody.stub.includes(linkBody.sha256), 'stub pins the hash');
@@ -467,7 +467,8 @@ async function main() {
   assert.equal(crypto.createHash('sha256').update(entry).digest('hex'), linkBody.sha256,
     'served entry must hash to the pinned value');
   assert.ok(entry.includes('/loadc.lua'), 'entry hands over to the chain');
-  assert.ok(entry.includes('chunk(key, scriptName)'), 'entry forwards positional key and script values');
+  assert.ok(entry.includes('local License, Script = ...') && entry.includes('chunk(License, Script)'),
+    'entry forwards License and Script positional arguments');
 
   const tampered = await fetch(`http://127.0.0.1:${port}${linkBody.path}?at=${'0'.repeat(8)}.${'a'.repeat(32)}`, {
     redirect: 'manual',
