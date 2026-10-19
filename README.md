@@ -52,10 +52,10 @@ PORT=10000 node server.js
 
 | บริการ | ที่อยู่ | สถานะ |
 |---|---|---|
-| เว็บ + API | https://loader999mss.vercel.app | matching fingerprint + HWID, BAD HWID/MS_112 kick, License/Script positional call, commit `f264b9a` (no realtime/WebSocket) |
+| เว็บ + API | https://loader999mss.vercel.app | matching fingerprint + HWID, BAD HWID/MS_112 kick, outbound marker/clipboard guard, License/Script positional call, commit `d9718be` (no realtime/WebSocket) |
 | แผงควบคุม | https://loader999mss.vercel.app/control | HTTP only |
 
-Production deploy เป็น commit `f264b9a`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. เว็บไซต์และ `/control` ใช้ positional `License`, `Script`. Outbound marker monitor ล่าสุดยังเป็น local และยังไม่ deploy.
+Production deploy เป็น commit `d9718be`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. เว็บไซต์และ `/control` ใช้ positional `License`, `Script`; outbound marker/clipboard guard อยู่ใน production แล้ว ส่วน kick สำหรับ provider-reported key-binding mismatch ล่าสุดยังเป็น local และยังไม่ deploy.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -63,7 +63,7 @@ Production deploy เป็น commit `f264b9a`: server ตรวจ HWID จา
 
 โปรเจกต์ `loader999mss` ผูกกับ repo **`rickhub940-ai/whilstkey`** สาขา `main` แล้ว
 → `git push origin main` = Vercel build + deploy production ให้เอง
-(ยืนยันล่าสุด: commit `f264b9a` ถูก build และขึ้น production โดยไม่ได้สั่ง deploy ด้วยมือ)
+(ยืนยันล่าสุด: commit `d9718be` ถูก build และขึ้น production โดยไม่ได้สั่ง deploy ด้วยมือ)
 
 (Render deploy จาก repo นั้น)
 
@@ -127,7 +127,7 @@ local gamaramam = { "<base>/<token>" }
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
 - การตรวจไฟล์ยังยึด marker ที่ byte 0 และ handoff URL ที่ถูกต้อง; ไม่ flag ไฟล์อื่นเพราะมีข้อความคล้าย marker ฝังอยู่ข้างใน
-- Local update ที่ยังไม่ push/deploy เพิ่ม outbound guard สำหรับ `print`/`warn`/console, HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ) และ clipboard APIs (`setclipboard`, `toclipboard`, `set_clipboard`): สแกน string/table หา header marker เต็มพร้อม next-link token ที่รูปแบบถูกต้องได้ทุกตำแหน่ง; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
+- Production `d9718be` เพิ่ม outbound guard สำหรับ `print`/`warn`/console, HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ) และ clipboard APIs (`setclipboard`, `toclipboard`, `set_clipboard`): สแกน string/table หา header marker เต็มพร้อม next-link token ที่รูปแบบถูกต้องได้ทุกตำแหน่ง; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
 - Hook ทำงานแบบ best-effort ตามความสามารถ executor และเก็บ guard ไว้หลัง payload เริ่มทำงาน; ไม่ได้ hook RemoteEvent/RemoteFunction หรือ arbitrary Lua function ทุกตัว และตรวจ marker ที่ถูก encode/compress ไม่ได้; table ที่ลึกเกิน 6 ชั้นหรือเกิน 1,024 entries จะ block แบบ fail-closed
 
 ## 2026-10-18 — HWID-only binding, 5 Base64 parts + ignored raw decoy (deployed `ba0738f`)
@@ -151,12 +151,18 @@ local gamaramam = { "<base>/<token>" }
 - Local revision ที่ยังไม่ push/deploy เพิ่มการ patch `RobloxPromptGui` ให้แสดง `[ 999MS ]` / เหตุผล, ลอง `replicatesignal(LocalPlayer.StatsAvailable, "Kick")` แบบ best-effort แล้วเรียก `LocalPlayer:Kick(reason)` เป็น fallback
 - Fingerprint เป็นข้อมูลที่ client ส่งมา ไม่ใช่ hardware attestation; การเปรียบเทียบนี้ไม่ได้ป้องกันการปลอมค่าจาก client ที่ควบคุม request ได้
 
-## 2026-10-19 — Pending local: pre/post runtime gate + wire scaffold
+## 2026-10-19 — pre/post runtime gate + wire scaffold (deployed `f264b9a`)
 
-- Local `/api/verify` จะบังคับ challenge ก่อนเรียก Platoboost; `/api/script` ยังคงตรวจ challenge หลังตรวจคีย์ และ `/api/script-verify` ตรวจ runtime proof หลังจากนั้น
-- `pack` / `buildEntries` ถูกเพิ่มเป็น scaffold ตามตัวอย่าง แต่ยังไม่ต่อเข้ากับ live `/api/q` protocol; `__stWireMask` และวิธี derive `wireKey` ยังไม่มี จึงไม่มีการอ้างว่าข้อมูลถูก mask แล้ว
-- Local-only update เพิ่ม kick เมื่อ Stage 3 (`loader.lua`) พบ error/exception รวม network, hash, compile, chain และ runtime failures; ใช้ CoreGui prompt, ลอง `replicatesignal` แบบ best-effort แล้ว fallback `LocalPlayer:Kick`. Stage 1 (`loadc.template.lua`) ไม่มีระบบเตะ; เส้นทางสำเร็จไม่ kick และ Stage 3 จะเตะเมื่อ error รวมถึง executor/network transient failure
-- การเปลี่ยนชุดนี้ผ่าน tests/build ในเครื่อง แต่ยังไม่ push/deploy; production ยังเป็น `a10803f`
+- `/api/verify` บังคับ challenge ก่อนเรียก Platoboost; `/api/script` ตรวจ challenge หลังตรวจคีย์ และ `/api/script-verify` ตรวจ runtime proof หลังจากนั้น
+- `pack` / `buildEntries` เป็น scaffold เท่านั้น ยังไม่ต่อเข้ากับ live `/api/q` protocol; `__stWireMask` และวิธี derive `wireKey` ยังไม่มี จึงไม่มีการอ้างว่าข้อมูลถูก mask แล้ว
+- Stage 3 (`loader.lua`) เตะเมื่อพบ error/exception; Stage 1 (`loadc.template.lua`) ไม่มีระบบเตะ
+
+## Local pending — kick เมื่อคีย์ผูกกับ HWID อื่น
+
+- เมื่อ HWID กับ fingerprint ตรงกัน API จะตั้งสถานะ mismatch เฉพาะเมื่อ Platoboost ส่งข้อความชัดเจน `this key has already been redeemed to a different identifier`; client จึงเตะด้วย reason ตรงตัว `invalid Hwid`
+- คีย์ผิด/หมดอายุ, rate limit หรือปัญหาบริการทั่วไปจะไม่ถูกตีความเป็น HWID mismatch
+- การเปลี่ยน key-binding kick นี้ยังเป็น local; outbound marker/clipboard guard อยู่ใน production `d9718be` แล้ว
+
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด
 

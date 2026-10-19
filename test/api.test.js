@@ -119,6 +119,9 @@ async function main() {
   const oldService = process.env.PLATO_SERVICE_ID;
   const oldSecret = process.env.PLATO_SECRET;
   let providerUrl;
+  let genericProviderResult;
+  let mismatchProviderResult;
+  const providerMismatchMessage = 'This key has already been redeemed to a different identifier; reset it at https://auth.platoboost.app/reset.';
   process.env.PLATO_SERVICE_ID = 'composite-test-service';
   process.env.PLATO_SECRET = 'composite-test-secret';
   global.fetch = async (url) => {
@@ -126,7 +129,12 @@ async function main() {
     return { status: 200, json: async () => ({ success: false, message: 'test response' }) };
   };
   try {
-    await verifyKey('non-prefix-test-key', pair.bindingId);
+    genericProviderResult = await verifyKey('non-prefix-test-key', pair.bindingId);
+    global.fetch = async (url) => {
+      providerUrl = String(url);
+      return { status: 200, json: async () => ({ success: false, message: providerMismatchMessage }) };
+    };
+    mismatchProviderResult = await verifyKey('non-prefix-test-key', pair.bindingId);
   } finally {
     global.fetch = oldFetch;
     if (oldService === undefined) delete process.env.PLATO_SERVICE_ID;
@@ -135,6 +143,12 @@ async function main() {
     else process.env.PLATO_SECRET = oldSecret;
   }
   assert.equal(new URL(providerUrl).searchParams.get('identifier'), hashBindingId(pair.bindingId));
+  assert.equal(genericProviderResult.deviceMismatch, undefined,
+    'generic provider rejections are not mislabeled as HWID mismatch');
+  assert.equal(mismatchProviderResult.deviceMismatch, true,
+    'the explicit different-identifier response is classified as a binding mismatch');
+  assert.equal(mismatchProviderResult.message, providerMismatchMessage,
+    'the exact provider message remains intact');
 
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('startup timeout')), 5_000);
@@ -367,6 +381,9 @@ async function main() {
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'payload.lua'), 'utf8'), /HttpRequest, Chain, ctx\)/);
   assert.match(mainForContext, /local Context = K[\s\S]*Context\.chain == Chain/);
   const payloadSource = fs.readFileSync(path.join(__dirname, '..', 'source', 'payload.lua'), 'utf8');
+  const authSource = fs.readFileSync(path.join(__dirname, '..', 'api', 'auth.js'), 'utf8');
+  assert.match(authSource, /if \(result\.deviceMismatch === true\) failure\.deviceMismatch = true/,
+    'the server forwards only the explicit provider device-mismatch classification');
   assert.match(payloadSource, /StopChecks\(true\)/,
     'successful payload launch keeps the Stage 2 outbound marker guard active');
   assert.ok(payloadSource.includes('local StartupError = ""'), 'UI error text uses its own local');
@@ -382,7 +399,9 @@ async function main() {
   ].join('\n');
   assert.equal((loaderSources.match(/:Kick\s*\(/g) || []).length, 4,
     'savecheck, loader, payload, and final verifier contain the intended kick handlers');
-  assert.match(payloadSource, /if reason ~= "BAD HWID : \]" then return end/);
+  assert.match(payloadSource, /if reason == "BAD HWID : \]" then/);
+  assert.match(payloadSource, /kickReason = "invalid Hwid"/);
+  assert.match(payloadSource, /KickBadHwid\(message, r1\.data\.deviceMismatch == true\)/);
   assert.match(mainForContext, /diagnostic == "BAD HWID : \]"/);
   assert.equal((loaderSources.match(/replicatesignal\s*\(/g) || []).length, 4,
     'all four kick handlers include the executor signal attempt');
@@ -429,8 +448,10 @@ async function main() {
   const verifierBody = (mainForContext.match(/local body = \{([\s\S]*?)\n\}/) || [])[1] || '';
   assert.equal(/\b(ticket|hwid|runtimeSecret|scriptToken)\s*=/.test(verifierBody), false,
     'outgoing verifier body uses opaque field names');
-  assert.match(payloadSource, /if reason ~= "BAD HWID : \]" then return end/);
-  assert.match(payloadSource, /LocalPlayer:Kick\(reason\)/);
+  assert.match(payloadSource, /if reason == "BAD HWID : \]" then/);
+  assert.match(payloadSource, /kickReason = "invalid Hwid"/);
+  assert.match(payloadSource, /KickBadHwid\(message, r1\.data\.deviceMismatch == true\)/);
+  assert.match(payloadSource, /LocalPlayer:Kick\(kickReason\)/);
   assert.match(mainForContext, /diagnostic == "BAD HWID : \]"/);
   assert.match(mainForContext, /LocalPlayer:Kick\(reason\)/);
   assert.match(mainForContext, /local function Abort\(reason\)/,

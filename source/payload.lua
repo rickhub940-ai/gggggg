@@ -458,14 +458,21 @@ local function LoadScript(d, h)
     StopChecks(true)
 end
 
-local function KickBadHwid(reason)
-    if reason ~= "BAD HWID : ]" then return end
+local function KickBadHwid(reason, deviceMismatch)
+    local kickReason
+    if reason == "BAD HWID : ]" then
+        kickReason = reason
+    elseif deviceMismatch == true then
+        kickReason = "invalid Hwid"
+    else
+        return
+    end
 
     local CoreGui = game:GetService("CoreGui")
     local Players = game:GetService("Players")
     local LocalPlayer = Players.LocalPlayer
     local customTitle = "[ 999MS ]"
-    local customMessage = "Reason :  " .. reason
+    local customMessage = "Reason :  " .. kickReason
 
     local function patchErrorPrompt()
         local success, result = pcall(function()
@@ -509,7 +516,7 @@ local function KickBadHwid(reason)
                 replicatesignal(LocalPlayer.StatsAvailable, "Kick")
             end
         end)
-        pcall(function() LocalPlayer:Kick(reason) end)
+        pcall(function() LocalPlayer:Kick(kickReason) end)
     end
 end
 
@@ -544,12 +551,12 @@ local function FetchAndLoad(key, sname)
     if r1.status == 429 then return nil, "Rate limited" end
     if r1.status == 403 then
         local message = r1.data.message or r1.data.error or "Banned"
-        KickBadHwid(message)
+        KickBadHwid(message, r1.data.deviceMismatch == true)
         return nil, message
     end
     if r1.status ~= 200 or r1.data.valid ~= true then
         local message = r1.data.message or r1.data.error or "Invalid key"
-        KickBadHwid(message)
+        KickBadHwid(message, r1.data.deviceMismatch == true)
         return nil, message
     end
     if not ChecksActive then return nil, "Cancelled" end
@@ -592,7 +599,7 @@ local function FetchAndLoad(key, sname)
     if not r2 then return nil, err2 or "Script fetch failed" end
     if r2.status ~= 200 then
         local message = r2.data.reason or r2.data.error or r2.body or "Script fetch failed"
-        KickBadHwid(message)
+        KickBadHwid(message, r2.data.deviceMismatch == true)
         return nil, message
     end
     if not ChecksActive then return nil, "Cancelled" end

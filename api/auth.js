@@ -664,10 +664,12 @@ async function handleVerify(req, res, ip) {
 
   const result = await verifyKey(key, bindingId);
   if (!result.valid) {
-    return res.status(result.rateLimited ? 429 : 200).json({
+    const failure = {
       valid: false,
       message: result.message || 'Invalid key',
-    });
+    };
+    if (result.deviceMismatch === true) failure.deviceMismatch = true;
+    return res.status(result.rateLimited ? 429 : 200).json(failure);
   }
 
   const ticket = issueTicket({
