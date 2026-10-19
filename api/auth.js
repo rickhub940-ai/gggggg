@@ -36,7 +36,7 @@ const ARTIFACT_FILES = Object.freeze({
   payload: 'payload.lua',
   sdk: '999MS-sdk.lua',
 });
-const STAGE_TWO_RAW_SHA256 = '9d869b8e065e791655bd2377e49400bc9f66e11507e85fdf65c2014ff820cf9c';
+const STAGE_TWO_RAW_SHA256 = 'ee27e3a51a9cb60539e77448ff8b05634aa6346962d437234a56e07187926328';
 
 // ═══ Rate limit ═══
 const rateLimit = new Map();

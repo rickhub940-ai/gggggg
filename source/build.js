@@ -29,13 +29,10 @@ const compact = (text, name) => {
   return out;
 };
 
-// Stage 2 keeps a literal placeholder that api/auth.js replaces per request
-// with the host the executor actually reached.
 // Stage 2 is built in two parts: the HEADER block (marker + next-stage link,
-// kept verbatim so the name and literals stay readable) and the BODY, which is
-// compacted. @BASE_URL@ stays unresolved so the server can fill it per host.
+// kept verbatim so the name and link slot stay readable) and the BODY, which is
+// compacted. File-marker detection only searches for the literal marker name.
 const stage2Raw = read('savecheck.lua');
-if (!stage2Raw.includes('@BASE_URL@')) throw new Error('savecheck.lua missing @BASE_URL@');
 
 const headerEnd = stage2Raw.indexOf('-- ═══ BODY ═══');
 if (headerEnd < 0) throw new Error('savecheck.lua missing the BODY marker');

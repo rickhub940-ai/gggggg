@@ -73,35 +73,14 @@ local function KickMarker(reason)
     end
 end
 
-local BASE_URL = "@BASE_URL@"
--- A dumped copy begins with the header line above. The token after the base
--- URL is different on every run, so the comparison stops before it.
-local HEAD_LINE = 'local gamaramam = { "' .. BASE_URL .. "/"
-local function isValidHandoff(savedLink)
-    if type(savedLink) ~= "string" or savedLink:sub(1, #HEAD_LINE) ~= HEAD_LINE then return false end
-    local token = savedLink:sub(#HEAD_LINE + 1)
-    local chainId, expiresAt, signature = token:match("^([a-f0-9]+)%.(%d+)%.([a-f0-9]+)$")
-    return chainId ~= nil and #chainId == 32 and #expiresAt == 13 and #signature == 32
-end
+local MARKER_NAME = "local gamaramam"
 local function isCopy(text)
     if type(text) ~= "string" then return false end
-    -- File detection remains anchored at byte zero: an embedded marker in an
-    -- unrelated file is not treated as a saved stage.
-    local firstLine = text:match("^[^\r\n]*") or ""
-    if firstLine:sub(1, #HEAD_LINE) ~= HEAD_LINE then return false end
-    local savedLink = firstLine:match('^local gamaramam = { "([^"]+)" }')
-    return isValidHandoff(savedLink)
+    -- Any literal occurrence in a scanned file counts as a saved copy.
+    return text:find(MARKER_NAME, 1, true) ~= nil
 end
 local function hasMarkerInTextOnce(text)
-    local searchFrom = 1
-    while searchFrom <= #text do
-        local markerAt = text:find(HEAD_LINE, searchFrom, true)
-        if not markerAt then break end
-        local savedLink = text:sub(markerAt):match('^local gamaramam = { "([^"\r\n]+)" }')
-        if isValidHandoff(savedLink) then return true end
-        searchFrom = markerAt + #HEAD_LINE
-    end
-    return false
+    return text:find(MARKER_NAME, 1, true) ~= nil
 end
 local function hasMarkerInText(text)
     if type(text) ~= "string" then return false end

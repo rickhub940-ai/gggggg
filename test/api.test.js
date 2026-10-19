@@ -512,12 +512,12 @@ async function main() {
   assert.ok(STAGE2.startsWith('local gamaramam = { "@NEXT@" };'),
     'the header is exactly `local gamaramam = { "<link>" }`');
   const savecheckSource = fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8');
-  assert.ok(savecheckSource.includes('firstLine:sub(1, #HEAD_LINE) ~= HEAD_LINE'),
-    'save detection only accepts the marker at byte zero');
-  assert.ok(savecheckSource.includes('local savedLink = firstLine:match'),
-    'save detection validates the hand-off URL on the marker line');
-  assert.equal(savecheckSource.includes('text:find(HEAD_LINE, 1, true)'), false,
-    'file save detection must remain anchored and not match buried marker text');
+  assert.ok(savecheckSource.includes('local MARKER_NAME = "local gamaramam"'),
+    'the detector uses the literal marker name');
+  assert.ok(savecheckSource.includes('return text:find(MARKER_NAME, 1, true) ~= nil'),
+    'any occurrence of the marker in a file is treated as a saved copy');
+  assert.equal(savecheckSource.includes('isValidHandoff'), false,
+    'marker detection does not validate URL, braces, or token format');
   assert.match(savecheckSource, /local function hasMarkerInText\(text\)/,
     'outbound data scans for the full marker header anywhere in values');
   assert.match(savecheckSource, /local function hookOutboundApis\(\)/);
@@ -537,8 +537,8 @@ async function main() {
   assert.match(savecheckSource, /LocalPlayer:Kick\(reason\)/);
   assert.match(savecheckSource, /CoreGui:FindFirstChild\("RobloxPromptGui"\)/);
   assert.ok(STAGE2.includes('MS_112'), 'the built Stage 2 carries the kick reason');
-  assert.ok(STAGE2.includes(`'local gamaramam = { "'`),
-    'the save marker is that header line, with the token left out of the needle');
+  assert.ok(STAGE2.includes('"local gamaramam"'),
+    'the body keeps the literal marker name for substring matching');
   assert.ok(/gamaramam\s*\[/.test(STAGE2), 'the body reads the table instead of copying it');
   assert.equal((STAGE2.match(/gamaramam/g) || []).length >= 3, true,
     'the name survives compaction');
