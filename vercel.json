@@ -2,8 +2,11 @@
   "functions": {
     "api/*.js": {
       "maxDuration": 10,
-      "includeFiles": "{scripts,artifacts,admin,web}/**"
+      "includeFiles": "{scripts,artifacts,obf,admin,web}/**"
     }
+  },
+  "env": {
+    "ARTIFACT_DIR": "obf"
   },
   "routes": [
     {

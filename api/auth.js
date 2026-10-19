@@ -36,7 +36,9 @@ const ARTIFACT_FILES = Object.freeze({
   payload: 'payload.lua',
   sdk: '999MS-sdk.lua',
 });
-const STAGE_TWO_RAW_SHA256 = 'ed9b283873823d372dca3ae4d3eaced6f299e9aa9824fe2110e471b3e084a7ea';
+const STAGE_TWO_RAW_SHA256 = 'a424541a93b11116ddb9c485ad3ed94cb230ceaf2ac40d0d83eee91fc9e94b7d';
+const OBF_MARKER = '-- 999MS-OBF:';
+const DEFAULT_ARTIFACT_DIR = 'artifacts';
 
 // ═══ Rate limit ═══
 const rateLimit = new Map();
@@ -465,11 +467,47 @@ module.exports = async function handler(req, res) {
   }
 };
 
+function artifactDir() {
+  const configured = process.env.ARTIFACT_DIR;
+  return typeof configured === 'string' && configured.trim() ? configured.trim() : DEFAULT_ARTIFACT_DIR;
+}
+
+const manifestCache = new Map();
+function readManifest(dir) {
+  const file = path.join(process.cwd(), dir, 'manifest.json');
+  let stat;
+  try { stat = fs.statSync(file); } catch { return null; }
+  const key = `${file}|${stat.mtimeMs}|${stat.size}`;
+  if (manifestCache.has(key)) return manifestCache.get(key);
+  try {
+    const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+    manifestCache.set(key, manifest);
+    return manifest;
+  } catch (error) {
+    console.error('[artifact] manifest', error.message);
+    return null;
+  }
+}
+
+function artifactMethod() {
+  const manifest = readManifest(artifactDir());
+  return manifest && typeof manifest.engine === 'string' ? manifest.engine : null;
+}
+
+function isPreobfuscated(body) {
+  return typeof body === 'string' && body.startsWith(OBF_MARKER);
+}
+
 function readArtifact(name) {
   const filename = ARTIFACT_FILES[name];
   if (!filename) return null;
-  const body = fs.readFileSync(path.join(process.cwd(), 'artifacts', filename), 'utf8');
-  if (name === 'loada' && crypto.createHash('sha256').update(body).digest('hex') !== STAGE_TWO_RAW_SHA256) {
+  const dir = artifactDir();
+  const body = fs.readFileSync(path.join(process.cwd(), dir, filename), 'utf8');
+  const digest = crypto.createHash('sha256').update(body).digest('hex');
+  const expected = readManifest(dir)?.files?.[name]?.sha256;
+  if (typeof expected === 'string' && /^[a-f0-9]{64}$/.test(expected)) {
+    if (digest !== expected) throw new Error(`${name} artifact integrity check failed (manifest)`);
+  } else if (name === 'loada' && digest !== STAGE_TWO_RAW_SHA256) {
     throw new Error('Stage-2 raw artifact integrity check failed');
   }
   return body;
@@ -550,12 +588,21 @@ async function serveArtifact(req, res, name, url, origin) {
     if (!link) return res.status(503).send('');
     const run = renderChain(baseUrl, link.token);
     if (!run) return res.status(503).send('');
-    const template = fs.readFileSync(path.join(process.cwd(), 'artifacts', 'loadc.lua'), 'utf8');
+    const template = readArtifact('loadc');
+    if (typeof template !== 'string') return res.status(503).send('');
     const rendered = template
       .replaceAll('__STAGE2_TOKEN__', link.token)
       .replaceAll('__STAGE2_SHA256__', run.sha)
       .replaceAll('__STAGE2_NONCE__', chainLinks.deriveNonce(link.token))
       .replaceAll('__BASE_URL__', baseUrl);
+    // A pre-obfuscated template keeps its readable token header, so the same
+    // substitution above produces the final body without another API call.
+    if (isPreobfuscated(template)) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('x-999ms-obf', artifactMethod() || 'prebuilt');
+      return res.status(200).send(rendered);
+    }
     const obfuscated = await obfuscateStageOne(rendered);
     if (!obfuscated) return res.status(503).send('');
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -780,10 +827,17 @@ async function handleScript(req, res, ip) {
   });
 
   let scriptBody;
-  try {
-    const p = path.join(process.cwd(), 'scripts', name + '.lua');
-    scriptBody = fs.readFileSync(p, 'utf8');
-  } catch {
+  const scriptCandidates = [
+    path.join(process.cwd(), artifactDir(), 'scripts', name + '.lua'),
+    path.join(process.cwd(), 'scripts', name + '.lua'),
+  ];
+  for (const candidate of scriptCandidates) {
+    try {
+      scriptBody = fs.readFileSync(candidate, 'utf8');
+      break;
+    } catch { /* try the next location */ }
+  }
+  if (typeof scriptBody !== 'string') {
     return res.status(200).json(encodeProtectedPayload({ Valid: false, reason: 'Script not found: ' + name }, xorKey));
   }
 

@@ -5,7 +5,10 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/api.test.js"
+    "test": "node test/api.test.js && node test/obf.test.js",
+    "obf": "node source/obf-build.js --engine auto",
+    "obf:wearedevs": "node source/obf-build.js --engine wearedevs",
+    "obf:prometheus": "node source/obf-build.js --engine prometheus"
   },
   "engines": {
     "node": ">=20"

@@ -1,9 +1,13 @@
 -- ===========================================================
 -- 999MS Payload — UI + server-backed authentication
 -- ===========================================================
+-- HEADER: the host stays readable/outside obfuscation and is passed in.
+local MS999_BASE_URL = "@BASE_URL@"
+-- ═══ BODY ═══ everything below is obfuscated at build time.
+-- ===========================================================
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local ctx
+local ctx, msBaseUrl = ...
 
 local function Abort(reason)
     local stop = type(ctx) == "table" and ctx.stopChecks or nil
@@ -13,12 +17,11 @@ local function Abort(reason)
     return false
 end
 
-local BASE_URL = "@BASE_URL@"
+local BASE_URL = msBaseUrl
 local CHAIN_VERSION = "999MS-chain-v1"
 local CHAIN_TTL = 60
 local CHAIN_SESSION_TTL = 30 * 60
 
-ctx = ...
 if type(ctx) ~= "table" then return Abort("[999MS] Context missing") end
 local Chain = ctx.chain
 local ChainId = type(Chain) == "table" and Chain.Id or nil

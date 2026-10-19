@@ -1,5 +1,7 @@
-
-
+-- HEADER: substituted per request and never obfuscated.
+local MS999_SCRIPT_ID = "${SCRIPTID}"
+-- ═══ BODY ═══ everything below is obfuscated at build time.
+local msScriptId = select(12, ...)
 
 local function Abort(reason)
     local message = "[999MS] " .. tostring(reason or "verification aborted")
@@ -8,7 +10,7 @@ local function Abort(reason)
 end
 
 local HttpService = game:GetService("HttpService")
-local ExpectedScript = "${SCRIPTID}"
+local ExpectedScript = msScriptId
 local CHAIN_VERSION = "999MS-chain-v1"
 local A, B, C, D, E, F, G, H, I, J, K = ...
 
