@@ -498,7 +498,8 @@ async function main() {
   assert.match(savecheckSource, /local function hasMarkerInText\(text\)/,
     'outbound data scans for the full marker header anywhere in values');
   assert.match(savecheckSource, /local function hookOutboundApis\(\)/);
-  assert.match(savecheckSource, /add\(print\)[\s\S]*add\(warn\)[\s\S]*add\(rconsoleprint\)[\s\S]*add\(request\)[\s\S]*add\(http_request\)/);
+  assert.match(savecheckSource, /add\(print\)[\s\S]*add\(warn\)[\s\S]*add\(rconsoleprint\)[\s\S]*add\(request\)[\s\S]*add\(http_request\)[\s\S]*add\(setclipboard\)/);
+  assert.match(savecheckSource, /add\(toclipboard\)[\s\S]*add\(set_clipboard\)/);
   assert.match(savecheckSource, /\{ "RequestAsync", "GetAsync", "PostAsync" \}/);
   assert.match(savecheckSource, /\{ "HttpGet", "HttpGetAsync", "HttpPost" \}/);
   assert.match(savecheckSource, /if not scanOk or containsMarker then/);

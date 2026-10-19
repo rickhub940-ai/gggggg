@@ -277,6 +277,9 @@ local function hookOutboundApis()
     add(rconsolewarn)
     add(request)
     add(http_request)
+    add(setclipboard)
+    add(toclipboard)
+    add(set_clipboard)
     if type(syn) == "table" then add(syn.request) end
     if type(http) == "table" then add(http.request) end
     for _, candidate in ipairs(candidates) do hookOutbound(candidate) end

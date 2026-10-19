@@ -127,7 +127,7 @@ local gamaramam = { "<base>/<token>" }
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
 - การตรวจไฟล์ยังยึด marker ที่ byte 0 และ handoff URL ที่ถูกต้อง; ไม่ flag ไฟล์อื่นเพราะมีข้อความคล้าย marker ฝังอยู่ข้างใน
-- Local update ที่ยังไม่ push/deploy เพิ่ม outbound guard สำหรับ `print`/`warn`/console และ HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ): สแกน string/table หา header marker เต็มพร้อม next-link token ที่รูปแบบถูกต้องได้ทุกตำแหน่ง; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
+- Local update ที่ยังไม่ push/deploy เพิ่ม outbound guard สำหรับ `print`/`warn`/console, HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ) และ clipboard APIs (`setclipboard`, `toclipboard`, `set_clipboard`): สแกน string/table หา header marker เต็มพร้อม next-link token ที่รูปแบบถูกต้องได้ทุกตำแหน่ง; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
 - Hook ทำงานแบบ best-effort ตามความสามารถ executor และเก็บ guard ไว้หลัง payload เริ่มทำงาน; ไม่ได้ hook RemoteEvent/RemoteFunction หรือ arbitrary Lua function ทุกตัว และตรวจ marker ที่ถูก encode/compress ไม่ได้; table ที่ลึกเกิน 6 ชั้นหรือเกิน 1,024 entries จะ block แบบ fail-closed
 
 ## 2026-10-18 — HWID-only binding, 5 Base64 parts + ignored raw decoy (deployed `ba0738f`)
