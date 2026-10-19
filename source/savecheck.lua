@@ -18,7 +18,7 @@ local function Abort(reason)
 end
 
 local function KickMarker(reason)
-    if reason ~= "MS_112" then return end
+    if reason ~= "MS_112" and reason ~= "rawset detected" then return end
     local CoreGui, LocalPlayer
     pcall(function() CoreGui = game:GetService("CoreGui") end)
     pcall(function() LocalPlayer = game:GetService("Players").LocalPlayer end)
@@ -266,6 +266,31 @@ local function hookOutbound(targetFunction)
     end
 end
 
+local function hookRawset(targetFunction)
+    if type(targetFunction) ~= "function" or outboundSeen[targetFunction] then return end
+    if type(hookfunction) ~= "function" or type(newcclosure) ~= "function" then return end
+    outboundSeen[targetFunction] = true
+    local original
+    local hookOk, previous = pcall(function()
+        return hookfunction(targetFunction, newcclosure(function(...)
+            if markerTriggered then return nil end
+            if outboundActive then
+                markerTriggered = true
+                pcall(KickMarker, "rawset detected")
+                return nil
+            end
+            if type(original) ~= "function" then return nil end
+            local result = packValues(pcall(original, ...))
+            if not result[1] then error(result[2], 0) end
+            return unpackValues(result, 2, result.n)
+        end))
+    end)
+    if hookOk and type(previous) == "function" then
+        original = previous
+        outboundHooks[#outboundHooks + 1] = { target = targetFunction, original = previous }
+    end
+end
+
 local function hookOutboundApis()
     local candidates = {}
     local function add(candidate)
@@ -350,6 +375,8 @@ ctx.stopChecks = function()
 end
 
 hookOutboundApis()
+hookRawset(rawset)
+if type(debug) == "table" then hookRawset(debug.rawset) end
 ctx.writeMonitor = hookInstalled and target or nil
 
 

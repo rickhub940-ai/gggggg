@@ -55,7 +55,7 @@ PORT=10000 node server.js
 | เว็บ + API | https://loader999mss.vercel.app | matching fingerprint + HWID, BAD HWID/MS_112 kick, outbound marker/clipboard guard, License/Script positional call, commit `d9718be` (no realtime/WebSocket) |
 | แผงควบคุม | https://loader999mss.vercel.app/control | HTTP only |
 
-Production deploy เป็น commit `d9718be`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. เว็บไซต์และ `/control` ใช้ positional `License`, `Script`; outbound marker/clipboard guard อยู่ใน production แล้ว ส่วน kick สำหรับ provider-reported key-binding mismatch ล่าสุดยังเป็น local และยังไม่ deploy.
+Production deploy เป็น commit `d9718be`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. เว็บไซต์และ `/control` ใช้ positional `License`, `Script`; outbound marker/clipboard guard อยู่ใน production แล้ว ส่วน kick สำหรับ provider-reported key-binding mismatch และ rawset detection ล่าสุดยังเป็น local และยังไม่ deploy.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -161,7 +161,8 @@ local gamaramam = { "<base>/<token>" }
 
 - เมื่อ HWID กับ fingerprint ตรงกัน API จะตั้งสถานะ mismatch เฉพาะเมื่อ Platoboost ส่งข้อความชัดเจน `this key has already been redeemed to a different identifier`; client จึงเตะด้วย reason ตรงตัว `invalid Hwid`
 - คีย์ผิด/หมดอายุ, rate limit หรือปัญหาบริการทั่วไปจะไม่ถูกตีความเป็น HWID mismatch
-- การเปลี่ยน key-binding kick นี้ยังเป็น local; outbound marker/clipboard guard อยู่ใน production `d9718be` แล้ว
+- Local-only เพิ่ม hook สำหรับ global `rawset` และ `debug.rawset`: ทุก call ที่ hook ได้จะ block และเตะ `rawset detected`; โค้ดที่ใช้ `rawset` อย่างปกติก็จะโดนด้วย และ executor ที่ไม่มี/หลบ hook ได้ยัง bypass ได้
+- การเปลี่ยนชุดนี้ยังเป็น local; outbound marker/clipboard guard อยู่ใน production `d9718be` แล้ว
 
 
 ## 2026-10-17 — ย่อทุก stage: ตัวแปร ≤ 2 ตัว, ไฟล์ละ 1 บรรทัด

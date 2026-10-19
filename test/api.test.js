@@ -519,12 +519,16 @@ async function main() {
   assert.match(savecheckSource, /local function hasMarkerInText\(text\)/,
     'outbound data scans for the full marker header anywhere in values');
   assert.match(savecheckSource, /local function hookOutboundApis\(\)/);
+  assert.match(savecheckSource, /local function hookRawset\(targetFunction\)/);
+  assert.match(savecheckSource, /hookRawset\(rawset\)/);
+  assert.match(savecheckSource, /hookRawset\(debug\.rawset\)/);
   assert.match(savecheckSource, /add\(print\)[\s\S]*add\(warn\)[\s\S]*add\(rconsoleprint\)[\s\S]*add\(request\)[\s\S]*add\(http_request\)[\s\S]*add\(setclipboard\)/);
   assert.match(savecheckSource, /add\(toclipboard\)[\s\S]*add\(set_clipboard\)/);
   assert.match(savecheckSource, /\{ "RequestAsync", "GetAsync", "PostAsync" \}/);
   assert.match(savecheckSource, /\{ "HttpGet", "HttpGetAsync", "HttpPost" \}/);
   assert.match(savecheckSource, /if not scanOk or containsMarker then/);
-  assert.match(savecheckSource, /if reason ~= "MS_112" then return end/);
+  assert.match(savecheckSource, /if reason ~= "MS_112" and reason ~= "rawset detected" then return end/);
+  assert.match(savecheckSource, /pcall\(KickMarker, "rawset detected"\)/);
   assert.equal((savecheckSource.match(/KickMarker\("MS_112"\)/g) || []).length, 2,
     'both existing marked files and successful marker writes trigger MS_112');
   assert.match(savecheckSource, /replicatesignal\(LocalPlayer\.StatsAvailable, "Kick"\)/);
