@@ -367,6 +367,8 @@ async function main() {
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'source', 'payload.lua'), 'utf8'), /HttpRequest, Chain, ctx\)/);
   assert.match(mainForContext, /local Context = K[\s\S]*Context\.chain == Chain/);
   const payloadSource = fs.readFileSync(path.join(__dirname, '..', 'source', 'payload.lua'), 'utf8');
+  assert.match(payloadSource, /StopChecks\(true\)/,
+    'successful payload launch keeps the Stage 2 outbound marker guard active');
   assert.ok(payloadSource.includes('local StartupError = ""'), 'UI error text uses its own local');
   assert.equal(payloadSource.includes('local E1 = ""'), false, 'UI error text must not shadow RNG helper E1');
 
@@ -492,7 +494,14 @@ async function main() {
   assert.ok(savecheckSource.includes('local savedLink = firstLine:match'),
     'save detection validates the hand-off URL on the marker line');
   assert.equal(savecheckSource.includes('text:find(HEAD_LINE, 1, true)'), false,
-    'save detection must not match marker text buried inside unrelated files');
+    'file save detection must remain anchored and not match buried marker text');
+  assert.match(savecheckSource, /local function hasMarkerInText\(text\)/,
+    'outbound data scans for the full marker header anywhere in values');
+  assert.match(savecheckSource, /local function hookOutboundApis\(\)/);
+  assert.match(savecheckSource, /add\(print\)[\s\S]*add\(warn\)[\s\S]*add\(rconsoleprint\)[\s\S]*add\(request\)[\s\S]*add\(http_request\)/);
+  assert.match(savecheckSource, /\{ "RequestAsync", "GetAsync", "PostAsync" \}/);
+  assert.match(savecheckSource, /\{ "HttpGet", "HttpGetAsync", "HttpPost" \}/);
+  assert.match(savecheckSource, /if not scanOk or containsMarker then/);
   assert.match(savecheckSource, /if reason ~= "MS_112" then return end/);
   assert.equal((savecheckSource.match(/KickMarker\("MS_112"\)/g) || []).length, 2,
     'both existing marked files and successful marker writes trigger MS_112');

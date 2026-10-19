@@ -78,7 +78,7 @@ local ChecksActive = true
 
 -- ═══ Helpers ═══
 -- Stop post-load monitoring without disconnecting or suspending the client.
-local function StopChecks()
+local function StopChecks(keepStageHooks)
     if not ChecksActive then return end
     ChecksActive = false
     Ticket = ""
@@ -89,7 +89,7 @@ local function StopChecks()
         ctx.chain = nil
     end
     local stopStageTwo = ctx.stopChecks
-    if type(stopStageTwo) == "function" then pcall(stopStageTwo) end
+    if not keepStageHooks and type(stopStageTwo) == "function" then pcall(stopStageTwo) end
     ctx.request = nil
     ctx.writeMonitor = nil
     ctx.key = nil
@@ -453,9 +453,9 @@ local function LoadScript(d, h)
 
     print("[999MS] Main script loaded")
 
-    -- The requested lifecycle ends monitoring once the protected script has
-    -- launched successfully. This also clears the session and stage-2 state.
-    StopChecks()
+    -- Clear auth/session secrets after launch but retain Stage 2's marker
+    -- output guard for the lifetime of the running script.
+    StopChecks(true)
 end
 
 local function KickBadHwid(reason)

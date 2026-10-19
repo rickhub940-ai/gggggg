@@ -19,8 +19,9 @@ end
 
 local function KickMarker(reason)
     if reason ~= "MS_112" then return end
-    local CoreGui = game:GetService("CoreGui")
-    local LocalPlayer = game:GetService("Players").LocalPlayer
+    local CoreGui, LocalPlayer
+    pcall(function() CoreGui = game:GetService("CoreGui") end)
+    pcall(function() LocalPlayer = game:GetService("Players").LocalPlayer end)
     local customTitle = "[ 999MS ]"
     local customMessage = "Reason :  " .. reason
 
@@ -53,11 +54,13 @@ local function KickMarker(reason)
             end
         end)
     end)
-    task.spawn(function()
-        for index = 1, 50 do
-            if patchErrorPrompt() then break end
-            task.wait(0.01)
-        end
+    pcall(function()
+        task.spawn(function()
+            for index = 1, 50 do
+                if patchErrorPrompt() then break end
+                task.wait(0.01)
+            end
+        end)
     end)
 
     if LocalPlayer then
@@ -74,18 +77,72 @@ local BASE_URL = "@BASE_URL@"
 -- A dumped copy begins with the header line above. The token after the base
 -- URL is different on every run, so the comparison stops before it.
 local HEAD_LINE = 'local gamaramam = { "' .. BASE_URL .. "/"
+local function isValidHandoff(savedLink)
+    if type(savedLink) ~= "string" or savedLink:sub(1, #HEAD_LINE) ~= HEAD_LINE then return false end
+    local token = savedLink:sub(#HEAD_LINE + 1)
+    local chainId, expiresAt, signature = token:match("^([a-f0-9]+)%.(%d+)%.([a-f0-9]+)$")
+    return chainId ~= nil and #chainId == 32 and #expiresAt == 13 and #signature == 32
+end
 local function isCopy(text)
     if type(text) ~= "string" then return false end
-    -- A saved stage must begin with the readable marker at byte zero. Check
-    -- the hand-off URL on that same header line; never match a marker substring
-    -- buried inside an unrelated executor cache/log file.
+    -- File detection remains anchored at byte zero: an embedded marker in an
+    -- unrelated file is not treated as a saved stage.
     local firstLine = text:match("^[^\r\n]*") or ""
     if firstLine:sub(1, #HEAD_LINE) ~= HEAD_LINE then return false end
     local savedLink = firstLine:match('^local gamaramam = { "([^"]+)" }')
-    if type(savedLink) ~= "string" or #savedLink <= #BASE_URL + 1 then return false end
-    if savedLink:sub(1, #BASE_URL + 1) ~= BASE_URL .. "/" then return false end
-    if savedLink:find("NEXT@", 1, true) then return false end
-    return true
+    return isValidHandoff(savedLink)
+end
+local function hasMarkerInTextOnce(text)
+    local searchFrom = 1
+    while searchFrom <= #text do
+        local markerAt = text:find(HEAD_LINE, searchFrom, true)
+        if not markerAt then break end
+        local savedLink = text:sub(markerAt):match('^local gamaramam = { "([^"\r\n]+)" }')
+        if isValidHandoff(savedLink) then return true end
+        searchFrom = markerAt + #HEAD_LINE
+    end
+    return false
+end
+local function hasMarkerInText(text)
+    if type(text) ~= "string" then return false end
+    if hasMarkerInTextOnce(text) then return true end
+    for _ = 1, 4 do
+        if not text:find("\\\"", 1, true) then return false end
+        local unescaped = text:gsub("\\\"", "\"")
+        if unescaped == text then return false end
+        text = unescaped
+        if hasMarkerInTextOnce(text) then return true end
+    end
+    return false
+end
+
+local packValues = table.pack or function(...) return { n = select("#", ...), ... } end
+local function hasMarkerInValue(value, depth, visited, budget)
+    local valueType = type(value)
+    if valueType == "string" then return hasMarkerInText(value) end
+    if valueType ~= "table" then return false end
+    if depth > 6 or budget[1] <= 0 then return true end
+    if visited[value] then return false end
+    visited[value] = true
+    local key, item = next(value)
+    while key ~= nil and budget[1] > 0 do
+        budget[1] = budget[1] - 1
+        if hasMarkerInValue(key, depth + 1, visited, budget)
+            or hasMarkerInValue(item, depth + 1, visited, budget) then
+            return true
+        end
+        key, item = next(value, key)
+    end
+    if key ~= nil then return true end
+    return false
+end
+local function hasMarkerInArgs(args)
+    local visited = {}
+    local budget = { 1024 }
+    for index = 1, args.n do
+        if hasMarkerInValue(args[index], 0, visited, budget) then return true end
+    end
+    return false
 end
 local CHAIN_VERSION = "999MS-chain-v1"
 local CHAIN_TTL = 60
@@ -161,15 +218,85 @@ function saved:Fire(...)
     for _, fn in ipairs(handlers) do pcall(fn, ...) end
 end
 local target = type(writefile) == "function" and writefile or nil
-local packValues = table.pack or function(...) return { n = select("#", ...), ... } end
 local unpackValues = table.unpack or unpack
 local oldWrite
 local saveConnection
 local checksActive = true
 local hookInstalled = false
+local outboundActive = true
+local markerTriggered = false
+local outboundHooks = {}
+local outboundSeen = {}
 
--- The monitor is best-effort: executors without hookfunction/newcclosure still
--- run the loader. It only reacts when the written file starts with our marker.
+local function restoreOutboundHooks()
+    outboundActive = false
+    if type(hookfunction) ~= "function" then return end
+    for index = #outboundHooks, 1, -1 do
+        local hook = outboundHooks[index]
+        pcall(function() hookfunction(hook.target, hook.original) end)
+    end
+    outboundHooks = {}
+end
+
+local function hookOutbound(targetFunction)
+    if type(targetFunction) ~= "function" or outboundSeen[targetFunction] then return end
+    if type(hookfunction) ~= "function" or type(newcclosure) ~= "function" then return end
+    outboundSeen[targetFunction] = true
+    local original
+    local hookOk, previous = pcall(function()
+        return hookfunction(targetFunction, newcclosure(function(...)
+            if markerTriggered then return nil end
+            if not outboundActive then return original(...) end
+            local arguments = packValues(...)
+            local scanOk, containsMarker = pcall(hasMarkerInArgs, arguments)
+            if not scanOk or containsMarker then
+                markerTriggered = true
+                pcall(KickMarker, "MS_112")
+                return nil
+            end
+            if type(original) ~= "function" then return nil end
+            local result = packValues(pcall(original, ...))
+            if not result[1] then error(result[2], 0) end
+            return unpackValues(result, 2, result.n)
+        end))
+    end)
+    if hookOk and type(previous) == "function" then
+        original = previous
+        outboundHooks[#outboundHooks + 1] = { target = targetFunction, original = previous }
+    end
+end
+
+local function hookOutboundApis()
+    local candidates = {}
+    local function add(candidate)
+        if type(candidate) == "function" then candidates[#candidates + 1] = candidate end
+    end
+    add(print)
+    add(warn)
+    add(rconsoleprint)
+    add(rconsolewarn)
+    add(request)
+    add(http_request)
+    if type(syn) == "table" then add(syn.request) end
+    if type(http) == "table" then add(http.request) end
+    for _, candidate in ipairs(candidates) do hookOutbound(candidate) end
+
+    pcall(function()
+        local service = game:GetService("HttpService")
+        for _, name in ipairs({ "RequestAsync", "GetAsync", "PostAsync" }) do
+            hookOutbound(service[name])
+        end
+    end)
+    pcall(function()
+        for _, name in ipairs({ "HttpGet", "HttpGetAsync", "HttpPost" }) do
+            hookOutbound(game[name])
+        end
+    end)
+end
+
+-- File and outbound monitors are best-effort: executors without hookfunction/
+-- newcclosure still run. File checks stay byte-zero anchored; outbound checks
+-- require a complete marker header with a valid handoff token.
 if target and type(hookfunction) == "function" and type(newcclosure) == "function" then
     local hookOk, original = pcall(function()
         return hookfunction(target, newcclosure(function(path, contents, ...)
@@ -214,10 +341,12 @@ ctx.stopChecks = function()
         pcall(function() hookfunction(target, oldWrite) end)
         hookInstalled = false
     end
+    restoreOutboundHooks()
     ctx.writeMonitor = nil
     ctx.stopChecks = nil
 end
 
+hookOutboundApis()
 ctx.writeMonitor = hookInstalled and target or nil
 
 

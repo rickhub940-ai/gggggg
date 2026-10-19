@@ -48,14 +48,14 @@ PORT=10000 node server.js
 
 ---
 
-## สถานะ production ล่าสุด (2026-10-18)
+## สถานะ production ล่าสุด (2026-10-19)
 
 | บริการ | ที่อยู่ | สถานะ |
 |---|---|---|
-| เว็บ + API | https://loader999ms.vercel.app | matching fingerprint + HWID + BAD HWID kick, commit `a10803f` (no realtime/WebSocket) |
-| แผงควบคุม | https://loader999ms.vercel.app/control | HTTP only |
+| เว็บ + API | https://loader999mss.vercel.app | matching fingerprint + HWID, BAD HWID/MS_112 kick, License/Script positional call, commit `f264b9a` (no realtime/WebSocket) |
+| แผงควบคุม | https://loader999mss.vercel.app/control | HTTP only |
 
-Production deploy เป็น commit `a10803f`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. Runtime/wire scaffold ล่าสุดยังเป็น local และยังไม่ deploy.
+Production deploy เป็น commit `f264b9a`: server ตรวจ HWID จาก Base64 5 ส่วนเทียบกับทุก header ที่ชื่อมีคำว่า `fingerprint` แบบไม่แยกตัวพิมพ์ใหญ่/เล็ก; `u` ยังเป็น decoy ที่ไม่ถูกใช้ยืนยันตัวตน. เมื่อ fingerprint ไม่ตรง server ตอบ `BAD HWID : ]` และ client ใช้ `Players.LocalPlayer:Kick`. เว็บไซต์และ `/control` ใช้ positional `License`, `Script`. Outbound marker monitor ล่าสุดยังเป็น local และยังไม่ deploy.
 
 จุดย้อนกลับ: tag `pre-source-package` และ `pre-no-websocket` ใน repo `whilstkey`
 
@@ -63,7 +63,7 @@ Production deploy เป็น commit `a10803f`: server ตรวจ HWID จา
 
 โปรเจกต์ `loader999mss` ผูกกับ repo **`rickhub940-ai/whilstkey`** สาขา `main` แล้ว
 → `git push origin main` = Vercel build + deploy production ให้เอง
-(ยืนยันแล้ว: commit `7883553` ถูก build และขึ้น production โดยไม่ได้สั่ง deploy ด้วยมือ)
+(ยืนยันล่าสุด: commit `f264b9a` ถูก build และขึ้น production โดยไม่ได้สั่ง deploy ด้วยมือ)
 
 (Render deploy จาก repo นั้น)
 
@@ -126,7 +126,9 @@ local gamaramam = { "<base>/<token>" }
 - ตรวจเฉพาะไฟล์ที่เริ่มด้วย marker นี้; ไม่ flag ไฟล์อื่นจากข้อความที่ฝังอยู่ข้างใน
 - scan เป็น shallow/capped ที่ 64 entries เพื่อไม่เดินทั้ง filesystem และไม่ทำ executor ค้าง
 - stages 2–4 ยังคงอ่านได้; ขั้น build จะเก็บ header marker ไว้และ compact เฉพาะ body ตามข้อกำหนด source/artifact
-- Local update ที่ยังไม่ push/deploy: เมื่อ scan พบไฟล์ที่ตรง marker หรือ write hook ตรวจพบการเขียนไฟล์ที่ตรง marker จะลบไฟล์และเตะด้วย `MS_112` พร้อม custom CoreGui prompt; ตรวจเฉพาะ marker ที่ byte 0 และ handoff URL ถูกต้อง ไม่ trigger จากข้อความ marker ที่ฝังในไฟล์อื่น
+- การตรวจไฟล์ยังยึด marker ที่ byte 0 และ handoff URL ที่ถูกต้อง; ไม่ flag ไฟล์อื่นเพราะมีข้อความคล้าย marker ฝังอยู่ข้างใน
+- Local update ที่ยังไม่ push/deploy เพิ่ม outbound guard สำหรับ `print`/`warn`/console และ HTTP APIs ที่ hook ได้ (`request`, `syn.request`, `http.request`, `HttpService`, `game:HttpGet` ฯลฯ): สแกน string/table หา header marker เต็มพร้อม next-link token ที่รูปแบบถูกต้องได้ทุกตำแหน่ง; ถ้าพบจะไม่เรียก API ต้นฉบับและ kick `MS_112`
+- Hook ทำงานแบบ best-effort ตามความสามารถ executor และเก็บ guard ไว้หลัง payload เริ่มทำงาน; ไม่ได้ hook RemoteEvent/RemoteFunction หรือ arbitrary Lua function ทุกตัว และตรวจ marker ที่ถูก encode/compress ไม่ได้; table ที่ลึกเกิน 6 ชั้นหรือเกิน 1,024 entries จะ block แบบ fail-closed
 
 ## 2026-10-18 — HWID-only binding, 5 Base64 parts + ignored raw decoy (deployed `ba0738f`)
 
