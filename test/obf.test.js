@@ -144,7 +144,7 @@ function testObfArtifacts() {
   }
   // The body is opaquely obfuscated: the readable prefix must be the marker +
   // header only, and must not contain the actual next-stage values.
-  console.log(`OK obf artifacts (${manifest.engine}/${manifest.preset})`);
+  console.log(`OK obf artifacts (${manifest.engine}/${manifest.preset || '-'})`);
 }
 
 (async () => {
