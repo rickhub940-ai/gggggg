@@ -509,6 +509,12 @@ async function main() {
   assert.ok(STAGE2.startsWith('local gamaramam = { "@NEXT@" };'),
     'the header is exactly `local gamaramam = { "<link>" }`');
   const savecheckSource = fs.readFileSync(path.join(__dirname, '..', 'source', 'savecheck.lua'), 'utf8');
+  const loadcTemplate = fs.readFileSync(path.join(__dirname, '..', 'source', 'loadc.template.lua'), 'utf8');
+  const loadcArtifact = fs.readFileSync(path.join(__dirname, '..', 'artifacts', 'loadc.lua'), 'utf8');
+  assert.match(loadcTemplate, /#body > 512 \* 1024/);
+  assert.ok(loadcArtifact.includes('#r>512*1024'));
+  assert.match(savecheckSource, /#body > 512 \* 1024/);
+  assert.ok(STAGE2.length < 512 * 1024, 'supplied Stage 2 fits the enlarged response cap');
   assert.ok(savecheckSource.includes('local MARKER_NAME = "local gamaramam"'),
     'the detector keys on the gamaramam marker name');
   assert.ok(savecheckSource.includes('return firstLine:sub(1, #MARKER_NAME) == MARKER_NAME'),

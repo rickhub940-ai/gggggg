@@ -414,7 +414,7 @@ if not ok or type(response) ~= "table" or status ~= 200 then
 end
 
 local body = response.Body or ""
-if #body > 256 * 1024 then return Abort("[999MS] Loader response too large") end
+if #body > 512 * 1024 then return Abort("[999MS] Loader response too large") end
 local okHash, digest = pcall(hasher, body, "sha256")
 if not okHash or type(digest) ~= "string" or string.lower(digest) ~= nextSha then
     return Abort("[999MS] Loader integrity check failed")

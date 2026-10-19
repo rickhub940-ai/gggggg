@@ -25,6 +25,7 @@ npm test                 # ทดสอบ API (ไม่ต้องมี netw
 ## Current chain artifacts
 - `obfuscated/` stores the supplied Centurion v6.3 outputs. The build copies those bytes unchanged and prepends `local gamaramam = { "@NEXT@" };` only to Stage 2/3; Stage 4 has no header.
 - The Stage 2–4 input files contain none of the literal runtime placeholders (`@NEXT_SHA@`, `@NONCE@`, `@BASE_URL@`) or the marker name in their obfuscated bodies. The API can replace only visible literal slots, so those body substitutions are not verified and may not work with these outputs.
+- Stage 1 and the readable Stage 2 source now allow responses up to 512 KiB. The supplied artifacts are about 444 KB / 351 KB / 455 KB; the Stage 2 obfuscated body's internal size guard remains opaque and is not verified by API tests.
 - `source/` remains available as readable reference but is not used to regenerate Stage 2–4 artifacts. No Lua runtime chain execution has been performed.
 
 ## รันlocal

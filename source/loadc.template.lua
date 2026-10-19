@@ -54,7 +54,7 @@ local okGet, response = pcall(requestFn, {
     Body = '{"p":"' .. proof .. '"}',
 })
 local body = type(response) == "table" and response.Body or nil
-if not okGet or type(body) ~= "string" or body == "" or #body > 256 * 1024 then
+if not okGet or type(body) ~= "string" or body == "" or #body > 512 * 1024 then
     error("MS999:S1:E02:HTTP_GET_FAILED", 0)
 end
 
