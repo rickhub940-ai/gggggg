@@ -1,4 +1,4 @@
--local gamaramam = { "@NEXT@" };
+local gamaramam = { "@NEXT@" };
 local __ms999_unpack = table.unpack or unpack;
 local __ms999_args = { n = select("#", ...), ... };
 local __ms999_base = __ms999_args.n;
